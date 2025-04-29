@@ -1,0 +1,64 @@
+# WebJobFinder Implementation Plan
+
+## 1. Project Structure
+- Create core components for each feature
+- Set up necessary APIs and services
+
+## 2. Required Dependencies
+```
+npm install axios openai puppeteer pdf-parse docx cheerio react-dropzone react-modal
+```
+
+## 3. Implementation Steps
+
+### Step 1: Resume Upload Component
+- Create a file upload component using react-dropzone
+- Support PDF and DOCX formats
+- Extract text content from resumes
+
+### Step 2: OpenAI Integration
+- Create OpenAI service for API calls
+- Implement function to generate job search terms from resume text
+- Implement function to evaluate job matches
+
+### Step 3: Web Scraping Module
+- Build a scraper service for Seek and other job sites
+- Implement search functionality using generated terms
+- Extract job details (title, company, description, URL)
+
+### Step 4: Job Matching Logic
+- Send scraped job descriptions to OpenAI
+- Compare with resume to determine relevance
+- Score and rank jobs by match quality
+
+### Step 5: User Interface
+- Main dashboard with resume upload
+- Job search results display
+- Job details modal
+- Saved/favorite jobs functionality
+
+### Step 6: Data Management
+- Store uploaded resume data temporarily
+- Save search results and matched jobs
+- Implement session persistence
+
+## 4. File Structure
+```
+src/
+  components/
+    ResumeUploader.tsx
+    JobList.tsx
+    JobDetails.tsx
+    SearchTerms.tsx
+  services/
+    openAiService.ts
+    scrapeService.ts
+    resumeParserService.ts
+  models/
+    Job.ts
+    Resume.ts
+  hooks/
+    useJobSearch.ts
+  App.tsx
+  index.tsx
+``` 

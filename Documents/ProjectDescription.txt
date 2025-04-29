@@ -1,0 +1,6 @@
+
+## Project description
+- this project lets you load your resume from local files on your pc 
+- generates search terms for jobs using OpenAi from the loaded resume
+- it then searches websites like seek using webscraping to find relevent jobs using the generated search terms to find the jobs
+- it then displays found jobs that are detemined to be matching by OpenAi and gives the user a list of found matching jobs
