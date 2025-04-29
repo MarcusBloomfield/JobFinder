@@ -1,44 +1,19 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Job } from '../models/Job';
-import JobDetails from './JobDetails';
 
 interface JobListProps {
   jobs: Job[];
-  favoriteJobs: Job[];
-  toggleFavorite: (jobId: string) => void;
   evaluateMatch: (jobId: string) => Promise<void>;
   isLoading: boolean;
 }
 
 const JobList: React.FC<JobListProps> = ({
   jobs,
-  favoriteJobs,
-  toggleFavorite,
   evaluateMatch,
   isLoading
 }) => {
-  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
-  const [showOnlyFavorites, setShowOnlyFavorites] = useState<boolean>(false);
-
   const handleJobClick = (job: Job) => {
-    setSelectedJob(job);
-  };
-
-  const closeDetails = () => {
-    setSelectedJob(null);
-  };
-
-  const handleToggleFavorite = (jobId: string, event: React.MouseEvent) => {
-    event.stopPropagation();
-    toggleFavorite(jobId);
-  };
-
-  const displayedJobs = showOnlyFavorites
-    ? favoriteJobs
-    : jobs;
-
-  const isJobFavorite = (jobId: string) => {
-    return favoriteJobs.some(job => job.id === jobId);
+    window.open(job.url, '_blank', 'noopener,noreferrer');
   };
 
   const getMatchColor = (score?: number) => {
@@ -51,18 +26,7 @@ const JobList: React.FC<JobListProps> = ({
   return (
     <div className="job-list-container">
       <div className="job-list-header">
-        <h3>Jobs {jobs.length > 0 && `(${displayedJobs.length})`}</h3>
-        <div className="filter-controls">
-          <label className="toggle-label">
-            <input
-              type="checkbox"
-              checked={showOnlyFavorites}
-              onChange={() => setShowOnlyFavorites(!showOnlyFavorites)}
-              disabled={isLoading}
-            />
-            <span>Show favorites only</span>
-          </label>
-        </div>
+        <h3>Jobs {jobs.length > 0 && `(${jobs.length})`}</h3>
       </div>
 
       {isLoading ? (
@@ -72,9 +36,9 @@ const JobList: React.FC<JobListProps> = ({
         </div>
       ) : (
         <>
-          {displayedJobs.length > 0 ? (
+          {jobs.length > 0 ? (
             <div className="job-list">
-              {displayedJobs.map((job) => (
+              {jobs.map((job) => (
                 <div 
                   key={job.id} 
                   className="job-card"
@@ -82,13 +46,6 @@ const JobList: React.FC<JobListProps> = ({
                 >
                   <div className="job-header">
                     <h4 className="job-title">{job.title}</h4>
-                    <button
-                      className={`favorite-button ${isJobFavorite(job.id) ? 'favorited' : ''}`}
-                      onClick={(e) => handleToggleFavorite(job.id, e)}
-                      aria-label={isJobFavorite(job.id) ? 'Remove from favorites' : 'Add to favorites'}
-                    >
-                      {isJobFavorite(job.id) ? '★' : '☆'}
-                    </button>
                   </div>
                   <div className="job-company">{job.company}</div>
                   {job.location && <div className="job-location">{job.location}</div>}
@@ -105,7 +62,7 @@ const JobList: React.FC<JobListProps> = ({
                   </div>
                   
                   <div className="job-card-footer">
-                    <span className="view-details">View Details</span>
+                    <span className="view-details">Visit Job Site</span>
                     {job.datePosted && <span className="job-date">{job.datePosted}</span>}
                   </div>
                 </div>
@@ -113,24 +70,10 @@ const JobList: React.FC<JobListProps> = ({
             </div>
           ) : (
             <div className="no-jobs-message">
-              {showOnlyFavorites ? (
-                <p>No favorite jobs yet. Add jobs to your favorites to see them here.</p>
-              ) : (
-                <p>No jobs found. Try searching with different terms.</p>
-              )}
+              <p>No jobs found. Try searching with different terms.</p>
             </div>
           )}
         </>
-      )}
-
-      {selectedJob && (
-        <JobDetails
-          job={selectedJob}
-          isFavorite={isJobFavorite(selectedJob.id)}
-          onClose={closeDetails}
-          onToggleFavorite={toggleFavorite}
-          onEvaluateMatch={evaluateMatch}
-        />
       )}
     </div>
   );

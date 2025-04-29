@@ -9,7 +9,6 @@ interface JobSearchState {
   resume: Resume | null;
   searchTerms: string[];
   jobs: Job[];
-  favoriteJobs: Job[];
   isLoading: boolean;
   error: string | null;
 }
@@ -17,7 +16,6 @@ interface JobSearchState {
 interface JobSearchActions {
   uploadResume: (file: File) => Promise<void>;
   searchJobs: (customTerms?: string[]) => Promise<void>;
-  toggleFavorite: (jobId: string) => void;
   evaluateMatch: (jobId: string) => Promise<void>;
 }
 
@@ -25,28 +23,8 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   const [resume, setResume] = useState<Resume | null>(null);
   const [searchTerms, setSearchTerms] = useState<string[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [favoriteJobs, setFavoriteJobs] = useState<Job[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Load saved jobs from localStorage on initial render
-  useEffect(() => {
-    try {
-      const savedFavorites = localStorage.getItem('favoriteJobs');
-      if (savedFavorites) {
-        setFavoriteJobs(JSON.parse(savedFavorites));
-      }
-    } catch (error) {
-      console.error('Error loading saved jobs:', error);
-    }
-  }, []);
-
-  // Save favorite jobs to localStorage when they change
-  useEffect(() => {
-    if (favoriteJobs.length > 0) {
-      localStorage.setItem('favoriteJobs', JSON.stringify(favoriteJobs));
-    }
-  }, [favoriteJobs]);
 
   const uploadResume = async (file: File): Promise<void> => {
     setIsLoading(true);
@@ -109,19 +87,6 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     }
   };
 
-  const toggleFavorite = (jobId: string): void => {
-    const job = jobs.find(j => j.id === jobId);
-    if (!job) return;
-
-    if (favoriteJobs.some(j => j.id === jobId)) {
-      // Remove from favorites
-      setFavoriteJobs(favoriteJobs.filter(j => j.id !== jobId));
-    } else {
-      // Add to favorites
-      setFavoriteJobs([...favoriteJobs, { ...job, isFavorite: true }]);
-    }
-  };
-
   const evaluateMatch = async (jobId: string): Promise<void> => {
     if (!resume) {
       setError('Please upload a resume first');
@@ -140,13 +105,6 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
         j.id === jobId ? { ...j, matchScore } : j
       ));
       
-      // Also update in favorites if present
-      if (favoriteJobs.some(j => j.id === jobId)) {
-        setFavoriteJobs(favoriteJobs.map(j => 
-          j.id === jobId ? { ...j, matchScore } : j
-        ));
-      }
-      
       setIsLoading(false);
     } catch (error) {
       console.error('Match evaluation error:', error);
@@ -155,8 +113,8 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   };
 
   return [
-    { resume, searchTerms, jobs, favoriteJobs, isLoading, error },
-    { uploadResume, searchJobs, toggleFavorite, evaluateMatch }
+    { resume, searchTerms, jobs, isLoading, error },
+    { uploadResume, searchJobs, evaluateMatch }
   ];
 };
 

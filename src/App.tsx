@@ -7,8 +7,8 @@ import './styles/App.css';
 
 const App: React.FC = () => {
   const [
-    { resume, searchTerms, jobs, favoriteJobs, isLoading, error },
-    { uploadResume, searchJobs, toggleFavorite, evaluateMatch }
+    { resume, searchTerms, jobs, isLoading, error },
+    { uploadResume, searchJobs, evaluateMatch }
   ] = useJobSearch();
 
   return (
@@ -65,8 +65,6 @@ const App: React.FC = () => {
             <div className="results-section">
               <JobList
                 jobs={jobs}
-                favoriteJobs={favoriteJobs}
-                toggleFavorite={toggleFavorite}
                 evaluateMatch={evaluateMatch}
                 isLoading={isLoading}
               />
