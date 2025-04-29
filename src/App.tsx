@@ -14,8 +14,8 @@ const App: React.FC = () => {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>WebJobFinder</h1>
-        <p>Upload your resume to find matching jobs</p>
+        <h1>Job Finder</h1>
+        <p>Upload your resume to find matching jobs with just a few clicks</p>
       </header>
 
       <main className="app-main">

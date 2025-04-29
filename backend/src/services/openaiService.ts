@@ -24,61 +24,93 @@ export const generateSearchTerms = async (resume: Resume): Promise<string[]> => 
     throw new Error('OpenAI API key is not configured in server environment variables.');
   }
   
-  console.log('Open AI successfully initialized');
+  console.log('Generating search terms for resume...');
+  console.log('Resume content length:', resume.content.length);
+  
+  // Log the actual content being sent (first 500 chars for brevity)
+  console.log('Resume content snippet:', resume.content ? resume.content.substring(0, 500) + (resume.content.length > 500 ? '...' : '') : '[EMPTY]');
+  
+  // Make sure we have content to analyze
+  if (!resume.content || resume.content.trim().length < 100) {
+    console.error('Resume content is empty or too short to analyze.');
+    throw new Error('Resume content is empty or too short to be analyzed effectively.');
+  }
 
-  console.log('Generating search terms from resume');
+  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+    {
+      role: 'system',
+      content: `You are a highly precise resume analysis tool.
+                Your sole function is to extract relevant job search terms directly from the provided resume content.
+                Do NOT invent terms, infer positions, or use information not explicitly present in the resume.
+                Stick strictly to the text provided.`
+    },
+    {
+      role: 'user',
+      content: `RESUME CONTENT START
+${resume.content}
+RESUME CONTENT END
+
+Based ONLY on the resume content provided above:
+1. Identify the most prominent and relevant skills, technologies, job titles, and industry keywords mentioned.
+2. From those identified terms, select exactly 5-8 job titles that would be effective job search terms for roles matching this specific resume.
+3. Prioritize terms that appear frequently or in significant contexts (like job titles or key skills sections).
+4. Format your response strictly as a JSON object with a single field "searchTerms" containing an array of strings.
+5. Do not include any introductory text, explanations, or apologies. Only the JSON object.`
+    }
+  ];
   
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: `Generate a list of 5-8 search job categories that would yield the most relevant job postings for this candidate.
-    Focus on job titles, and industry terms that employers would use in job listings.
-    Example: software engineer, developer, programmer, C#, Unity, game development, 3D.
-                    Respond with ONLY a JSON object with the field "searchTerms" containing an array of strings.`
-        },
-        {
-          role: 'user',
-          content: resume.content
-        }
-      ],
-      temperature: 0.3,
+      model: 'gpt-4o', // Using gpt-4o for potentially better accuracy
+      messages: messages,
+      temperature: 0.1, // Further reduced temperature for precision
       response_format: { type: 'json_object' }
     });
     
     const responseContent = response.choices[0]?.message.content;
     if (!responseContent) {
+      console.error('Empty response content from OpenAI');
       throw new Error('Empty response from OpenAI');
     }
+    
+    console.log('Raw OpenAI response:', responseContent);
     
     try {
       // Parse the JSON response from OpenAI
       const jsonResponse = JSON.parse(responseContent);
-      
+    
       // Extract the array of search terms
       if (Array.isArray(jsonResponse.searchTerms)) {
+        if (jsonResponse.searchTerms.length === 0) {
+          console.error('No search terms found in OpenAI response');
+          throw new Error('No search terms found in OpenAI response');
+        }
+        console.log('Successfully generated search terms:', jsonResponse.searchTerms);
         return jsonResponse.searchTerms;
       } else {
-        console.error('Unexpected response format from OpenAI:', jsonResponse);
+        console.error('Unexpected JSON structure from OpenAI:', jsonResponse);
         
-        // Fallback to extracting any array found in the response
+        // Attempt a more flexible extraction if the primary field is missing
         for (const key in jsonResponse) {
           if (Array.isArray(jsonResponse[key])) {
+            console.warn(`Found search terms in alternate field: '${key}'. Returning these.`);
             return jsonResponse[key];
           }
         }
         
-        throw new Error('Could not find search terms array in OpenAI response');
+        throw new Error('Could not find a valid "searchTerms" array in the OpenAI response.');
       }
     } catch (parseError) {
-      console.error('Error parsing OpenAI response:', parseError);
-      throw new Error('Failed to parse OpenAI response');
+      console.error('Error parsing OpenAI JSON response:', parseError, '\nRaw response:', responseContent);
+      throw new Error(`Failed to parse OpenAI response. Raw response: ${responseContent}`);
     }
   } catch (error) {
-    console.error('Error calling OpenAI API:', error);
-    throw new Error('Failed to generate search terms from resume');
+    if (error instanceof OpenAI.APIError) {
+        console.error('OpenAI API Error:', error.status, error.name, error.message);
+    } else {
+        console.error('Error calling OpenAI API:', error);
+    }
+    throw new Error('Failed to generate search terms due to an API error or unexpected issue.');
   }
 };
 
@@ -99,12 +131,7 @@ export const evaluateJobMatch = async (job: Job, resume: Resume): Promise<number
         {
           role: 'system',
           content: `You are a helpful assistant that evaluates how well a job listing matches a candidate's resume.
-                    Rate the match on a scale from 0 to 100, where:
-                    - 0-20: Poor match with very few matching skills or requirements
-                    - 21-40: Below average match with some overlapping skills
-                    - 41-60: Average match with several matching skills and requirements
-                    - 61-80: Good match with many matching skills and requirements
-                    - 81-100: Excellent match with nearly all requirements satisfied
+                    Rate the match on a scale from 0 to 100.
                     Respond with ONLY a JSON object with a single field "score" containing the numeric score.`
         },
         {

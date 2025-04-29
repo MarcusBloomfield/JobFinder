@@ -20,6 +20,7 @@
     "axios": "^1.9.0",
     "cheerio": "^1.0.0",
     "docx": "^9.4.1",
+    "mammoth": "^1.9.0",
     "openai": "^4.96.0",
     "pdf-parse": "^1.1.1",
     "puppeteer": "^24.7.2",

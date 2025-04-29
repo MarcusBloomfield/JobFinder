@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
 import pdfParse from 'pdf-parse';
-import { Document } from 'docx';
+import mammoth from 'mammoth'; // Import mammoth
 // Import proper types for Express Multer
 import { Multer } from 'multer';
 
@@ -52,14 +52,13 @@ export const extractDocxText = async (filePath: string): Promise<string> => {
   console.log('Extracting text from DOCX:', filePath);
   
   try {
-    // Simple implementation that extracts basic text
-    // A more advanced implementation would parse the DOCX structure properly
-    // But for now, let's just read the file and return a placeholder
-    const content = fs.readFileSync(filePath);
-    console.log(`Read DOCX file of size ${content.length} bytes`);
-    return `[DOCX content extracted - ${content.length} bytes]`;
+    // Use mammoth to extract raw text from the DOCX file
+    const result = await mammoth.extractRawText({ path: filePath });
+    const text = result.value; // The raw text
+    console.log(`Successfully extracted ${text.length} characters from DOCX.`);
+    return text;
   } catch (error) {
-    console.error('Error extracting text from DOCX:', error);
+    console.error('Error extracting text from DOCX using mammoth:', error);
     throw new Error('Failed to extract text from DOCX file');
   }
 };
