@@ -132,7 +132,7 @@ const mockJobs = [
 ];
 
 // Generate mock jobs based on search terms
-const generateMockJobs = (searchTerms: string): Job[] => {
+const generateMockJobs = (searchTerms: string, location: string = 'Perth, WA'): Job[] => {
   return mockJobs.map(job => ({
     ...job,
     id: uuidv4(),
@@ -140,7 +140,8 @@ const generateMockJobs = (searchTerms: string): Job[] => {
       job.title.replace('Web', 'React') : 
       searchTerms.includes('TypeScript') ? 
         job.title.replace('Developer', 'TypeScript Developer') : 
-        job.title
+        job.title,
+    location: location // Override with the requested location
   }));
 };
 
@@ -150,15 +151,17 @@ const generateMockJobs = (searchTerms: string): Job[] => {
 export const scrapeJobSite = async (
   site: 'seek' | 'indeed' | 'linkedin',
   searchTerms: string,
-  pageLimit: number = 1
+  pageLimit: number = 1,
+  location: string = 'Perth, WA'
 ): Promise<Job[]> => {
-  console.log(`Scraping ${site} with search terms: ${searchTerms}`);
+  console.log(`Scraping ${site} with search terms: ${searchTerms} in location: ${location}`);
   
   try {
     const response = await axios.post(`${API_URL}/scrape/site`, {
       site,
       searchTerms,
-      pageLimit
+      pageLimit,
+      location
     });
     
     if (response.data && response.data.data) {
@@ -172,7 +175,7 @@ export const scrapeJobSite = async (
     // Fallback to mock data when backend fails
     console.log(`[FALLBACK] Using mock data for ${site}`);
     await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate delay
-    return generateMockJobs(searchTerms);
+    return generateMockJobs(searchTerms, location);
   }
 };
 
@@ -182,15 +185,17 @@ export const scrapeJobSite = async (
 export const scrapeJobs = async (
   searchTerms: string[],
   sites: ('seek' | 'indeed' | 'linkedin')[] = ['seek', 'indeed'],
-  pageLimit: number = 1
+  pageLimit: number = 1,
+  location: string = 'Perth, WA'
 ): Promise<Job[]> => {
-  console.log('Scraping jobs with search terms:', searchTerms);
+  console.log(`Scraping jobs with search terms: ${searchTerms} in location: ${location}`);
   
   try {
     const response = await axios.post(`${API_URL}/scrape/jobs`, {
       searchTerms,
       sites,
-      pageLimit
+      pageLimit,
+      location
     });
     
     if (response.data && response.data.data) {
@@ -201,19 +206,15 @@ export const scrapeJobs = async (
   } catch (error) {
     console.error('Error scraping jobs:', error);
     
-    // Fallback to mock implementation when backend fails
-    console.log('[FALLBACK] Using mock data for job scraping');
+    // Fallback to mock data when backend fails
+    console.log('[FALLBACK] Using mock data for jobs');
+    
     let allJobs: Job[] = [];
     
+    // Generate mock jobs for each search term
     for (const term of searchTerms) {
-      for (const site of sites) {
-        try {
-          const jobs = await scrapeJobSite(site, term, pageLimit);
-          allJobs.push(...jobs);
-        } catch (error) {
-          console.error(`Error scraping ${site} for term "${term}":`, error);
-        }
-      }
+      await new Promise(resolve => setTimeout(resolve, 500)); // Simulate delay
+      allJobs = [...allJobs, ...generateMockJobs(term, location)];
     }
     
     // Remove duplicates based on title+company

@@ -626,4 +626,169 @@ textarea {
   .modal-buttons {
     flex-direction: column;
   }
+}
+
+/* Add styles for the LocationSelector component */
+
+.location-selector {
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.location-selector-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.location-selector-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #333;
+}
+
+.edit-button {
+  background-color: #f0f0f0;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.edit-button:hover:not(:disabled) {
+  background-color: #e0e0e0;
+}
+
+.edit-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.location-edit-mode form {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 16px;
+}
+
+.location-edit-mode input {
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  font-size: 0.95rem;
+}
+
+.location-edit-mode input:focus {
+  border-color: #4a90e2;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.2);
+}
+
+.location-edit-mode .buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.save-button, .cancel-button {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.save-button {
+  background-color: #4a90e2;
+  color: white;
+  border: none;
+}
+
+.save-button:hover:not(:disabled) {
+  background-color: #3a80d2;
+}
+
+.save-button:disabled {
+  background-color: #a2c4f0;
+  cursor: not-allowed;
+}
+
+.cancel-button {
+  background-color: #f0f0f0;
+  border: 1px solid #ddd;
+  color: #333;
+}
+
+.cancel-button:hover:not(:disabled) {
+  background-color: #e0e0e0;
+}
+
+.cancel-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.popular-locations {
+  margin-top: 16px;
+}
+
+.popular-locations h4 {
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+  color: #555;
+}
+
+.location-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.location-button {
+  background-color: #fff;
+  border: 1px solid #ddd;
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.location-button.active {
+  background-color: #e6f0fd;
+  border-color: #4a90e2;
+  color: #4a90e2;
+}
+
+.location-button:hover:not(:disabled) {
+  background-color: #f0f0f0;
+}
+
+.location-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.current-location {
+  padding: 6px 0;
+}
+
+.location-display {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #555;
+}
+
+.location-display svg {
+  color: #4a90e2;
+}
+
+.location-display span {
+  font-size: 0.95rem;
 } 

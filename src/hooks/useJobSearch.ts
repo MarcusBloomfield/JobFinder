@@ -11,12 +11,14 @@ interface JobSearchState {
   jobs: Job[];
   isLoading: boolean;
   error: string | null;
+  location: string;
 }
 
 interface JobSearchActions {
   uploadResume: (file: File) => Promise<void>;
   searchJobs: (customTerms?: string[]) => Promise<void>;
   evaluateMatch: (jobId: string) => Promise<void>;
+  setLocation: (location: string) => void;
 }
 
 const useJobSearch = (): [JobSearchState, JobSearchActions] => {
@@ -25,6 +27,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [location, setLocation] = useState<string>('Perth, WA');
 
   const uploadResume = async (file: File): Promise<void> => {
     setIsLoading(true);
@@ -61,8 +64,8 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
         throw new Error('No search terms available');
       }
       
-      // Scrape jobs using the search terms
-      const scrapedJobs = await scrapeJobs(termsToUse, ['seek', 'indeed'], 2);
+      // Scrape jobs using the search terms and location
+      const scrapedJobs = await scrapeJobs(termsToUse, ['seek', 'indeed'], 2, location);
       setJobs(scrapedJobs);
       
       // If resume is available, evaluate match scores for each job
@@ -112,9 +115,13 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     }
   };
 
+  const updateLocation = (newLocation: string): void => {
+    setLocation(newLocation);
+  };
+
   return [
-    { resume, searchTerms, jobs, isLoading, error },
-    { uploadResume, searchJobs, evaluateMatch }
+    { resume, searchTerms, jobs, isLoading, error, location },
+    { uploadResume, searchJobs, evaluateMatch, setLocation: updateLocation }
   ];
 };
 

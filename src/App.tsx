@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import ResumeUploader from './components/ResumeUploader';
 import SearchTerms from './components/SearchTerms';
+import LocationSelector from './components/LocationSelector';
 import JobList from './components/JobList';
 import useJobSearch from './hooks/useJobSearch';
 import './styles/App.css';
 
 const App: React.FC = () => {
   const [
-    { resume, searchTerms, jobs, isLoading, error },
-    { uploadResume, searchJobs, evaluateMatch }
+    { resume, searchTerms, jobs, isLoading, error, location },
+    { uploadResume, searchJobs, evaluateMatch, setLocation }
   ] = useJobSearch();
 
   return (
@@ -59,6 +60,12 @@ const App: React.FC = () => {
                 terms={searchTerms} 
                 onSearch={searchJobs} 
                 isLoading={isLoading} 
+              />
+              
+              <LocationSelector
+                location={location}
+                onLocationChange={setLocation}
+                isLoading={isLoading}
               />
             </div>
 

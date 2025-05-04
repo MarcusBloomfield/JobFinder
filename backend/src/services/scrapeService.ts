@@ -67,6 +67,7 @@ interface ScrapeConfig {
   locationSelector?: string;
   salarySelector?: string;
   datePostedSelector?: string;
+  locationParam?: string;
 }
 
 const siteConfigs: Record<string, ScrapeConfig> = {
@@ -78,7 +79,8 @@ const siteConfigs: Record<string, ScrapeConfig> = {
     linkSelector: '[data-automation="jobTitle"]',
     locationSelector: '[data-automation="jobLocation"]',
     salarySelector: '[data-automation="jobSalary"]',
-    datePostedSelector: '[data-automation="jobListingDate"]'
+    datePostedSelector: '[data-automation="jobListingDate"]',
+    locationParam: '&where='
   },
   indeed: {
     searchUrl: 'https://www.indeed.com/jobs?q=',
@@ -87,7 +89,8 @@ const siteConfigs: Record<string, ScrapeConfig> = {
     descriptionSelector: '.job-snippet',
     linkSelector: '.jcs-JobTitle',
     locationSelector: '.companyLocation',
-    datePostedSelector: '.date'
+    datePostedSelector: '.date',
+    locationParam: '&l='
   },
   linkedin: {
     searchUrl: 'https://www.linkedin.com/jobs/search/?keywords=',
@@ -96,7 +99,8 @@ const siteConfigs: Record<string, ScrapeConfig> = {
     descriptionSelector: '.job-card-list__description',
     linkSelector: '.job-card-list__title',
     locationSelector: '.job-card-container__metadata-item',
-    datePostedSelector: '.job-card-container__posted-date'
+    datePostedSelector: '.job-card-container__posted-date',
+    locationParam: '&location='
   }
 };
 
@@ -106,9 +110,10 @@ const siteConfigs: Record<string, ScrapeConfig> = {
 export const scrapeJobSite = async (
   site: 'seek' | 'indeed' | 'linkedin',
   searchTerms: string,
+  location: string = 'Perth, WA',
   pageLimit: number = 1
 ): Promise<Job[]> => {
-  console.log(`Scraping ${site} with search terms: ${searchTerms}`);
+  console.log(`Scraping ${site} with search terms: ${searchTerms} in location: ${location}`);
   
   const config = siteConfigs[site];
   if (!config) {
@@ -178,8 +183,14 @@ export const scrapeJobSite = async (
       });
     }
     
-    // Navigate to search URL with search terms
-    const searchUrl = `${config.searchUrl}${encodeURIComponent(searchTerms)}`;
+    // Navigate to search URL with search terms and location
+    let searchUrl = `${config.searchUrl}${encodeURIComponent(searchTerms)}`;
+    
+    // Add location parameter if available in the config
+    if (config.locationParam && location) {
+      searchUrl += `${config.locationParam}${encodeURIComponent(location)}`;
+    }
+    
     console.log(`Navigating to: ${searchUrl}`);
     await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
     
@@ -435,9 +446,10 @@ const clickNextPage = async (page: Page, site: string): Promise<void> => {
 export const scrapeJobs = async (
   searchTerms: string[],
   sites: ('seek' | 'indeed' | 'linkedin')[] = ['seek', 'indeed'],
-  pageLimit: number = 1
+  pageLimit: number = 1,
+  location: string = 'Perth, WA'
 ): Promise<Job[]> => {
-  console.log('Scraping jobs with search terms:', searchTerms);
+  console.log(`Scraping jobs with search terms: ${searchTerms} in location: ${location}`);
   let allJobs: Job[] = [];
   
   // Shuffle the order of sites and terms to appear less predictable
@@ -464,7 +476,7 @@ export const scrapeJobs = async (
         console.log(`Delay before scraping ${site} for term "${term}": ${siteSwitchDelay}ms`);
         await delay(siteSwitchDelay);
         
-        const jobs = await scrapeJobSite(site, term, pageLimit);
+        const jobs = await scrapeJobSite(site, term, location, pageLimit);
         
         // Small delay after getting results before processing them
         const postResultDelay = randomDelay(500, 1500);
