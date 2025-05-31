@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Resume } from '../models/Resume';
 import { Job } from '../models/Job';
 import { parseResume } from '../services/resumeParserService';
-import { generateSearchTerms, evaluateJobMatch } from '../services/openAiService';
+import { generateSearchTerms, evaluateJobMatch, evaluateJobMatchesBulk } from '../services/openAiService';
 import { scrapeJobs } from '../services/scrapeService';
 
 interface JobSearchState {
@@ -66,20 +66,25 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       
       // Scrape jobs using the search terms and location
       const scrapedJobs = await scrapeJobs(termsToUse, ['seek', 'indeed'], 2, location);
-      setJobs(scrapedJobs);
       
-      // If resume is available, evaluate match scores for each job
+      // If resume is available, evaluate match scores for all jobs at once
       if (resume) {
-        const jobsWithScores = await Promise.all(
-          scrapedJobs.map(async (job) => {
-            const matchScore = await evaluateJobMatch(job, resume);
-            return { ...job, matchScore };
-          })
-        );
+        console.log(`Evaluating match scores for ${scrapedJobs.length} jobs in bulk`);
+        
+        // Use the bulk evaluation service to process all jobs at once
+        const matchScores = await evaluateJobMatchesBulk(scrapedJobs, resume);
+        
+        // Apply match scores to the jobs
+        const jobsWithScores = scrapedJobs.map(job => ({
+          ...job,
+          matchScore: matchScores[job.id] || 0
+        }));
         
         // Sort by match score (highest first)
         jobsWithScores.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
         setJobs(jobsWithScores);
+      } else {
+        setJobs(scrapedJobs);
       }
       
       setIsLoading(false);

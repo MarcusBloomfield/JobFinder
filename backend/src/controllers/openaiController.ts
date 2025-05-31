@@ -93,6 +93,73 @@ export const evaluateJobMatch = async (req: Request, res: Response) => {
 };
 
 /**
+ * Evaluate multiple job matches in bulk
+ * @route POST /api/openai/evaluate-job-matches-bulk
+ */
+export const evaluateJobMatchesBulk = async (req: Request, res: Response) => {
+  try {
+    const { jobs, resume } = req.body;
+    
+    if (!jobs || !Array.isArray(jobs) || !resume) {
+      return res.status(400).json({
+        error: true,
+        message: 'Missing required parameters: jobs (array), resume'
+      });
+    }
+    
+    // Validate resume object
+    if (!validateResume(resume)) {
+      return res.status(400).json({
+        error: true,
+        message: 'Invalid resume object. Must include id, fileName, fileType, and content.'
+      });
+    }
+    
+    // Validate job objects
+    const invalidJobs = jobs.filter(job => !validateJob(job));
+    if (invalidJobs.length > 0) {
+      return res.status(400).json({
+        error: true,
+        message: `Invalid job objects. ${invalidJobs.length} jobs failed validation.`
+      });
+    }
+    
+    console.log(`Processing bulk evaluation for ${jobs.length} jobs`);
+    
+    // Process job evaluations in parallel
+    const evaluationPromises = jobs.map(job => 
+      openaiService.evaluateJobMatch(job, resume)
+        .then(matchScore => ({
+          id: job.id,
+          matchScore
+        }))
+        .catch(error => {
+          console.error(`Error evaluating job "${job.title}":`, error);
+          return {
+            id: job.id,
+            matchScore: 0,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          };
+        })
+    );
+    
+    const results = await Promise.all(evaluationPromises);
+    
+    res.status(200).json({
+      error: false,
+      message: `Successfully evaluated ${results.length} jobs`,
+      data: results
+    });
+  } catch (error) {
+    console.error('Error in bulk job evaluation:', error);
+    res.status(500).json({
+      error: true,
+      message: error instanceof Error ? error.message : 'An unknown error occurred'
+    });
+  }
+};
+
+/**
  * Validate resume object
  */
 const validateResume = (resume: any): resume is Resume => {

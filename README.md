@@ -2,6 +2,12 @@
 
 WebJobFinder is a web application that helps job seekers find relevant job opportunities by analyzing their resume and matching it with scraped job listings.
 
+## Application Interface
+
+![Job Finder Application](JOBS.png)
+
+*Screenshot showing the Job Finder interface with resume upload, search terms selection, and job matching results*
+
 ## Features
 
 - **Resume Upload**: Upload your resume in PDF or DOCX format

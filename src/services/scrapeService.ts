@@ -1,6 +1,4 @@
 import axios from 'axios';
-import type { Browser, Page } from 'puppeteer';
-import * as cheerio from 'cheerio';
 import { Job } from '../models/Job';
 import { v4 as uuidv4 } from 'uuid';
 
