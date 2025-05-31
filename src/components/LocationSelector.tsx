@@ -46,7 +46,7 @@ const LocationSelector: React.FC<LocationSelectorProps> = ({
         {!isEditing && (
           <button 
             onClick={() => setIsEditing(true)} 
-            className="edit-button"
+            className="toggle-button"
             disabled={isLoading}
           >
             Edit

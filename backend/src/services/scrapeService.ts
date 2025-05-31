@@ -81,26 +81,6 @@ const siteConfigs: Record<string, ScrapeConfig> = {
     salarySelector: '[data-automation="jobSalary"]',
     datePostedSelector: '[data-automation="jobListingDate"]',
     locationParam: '&where='
-  },
-  indeed: {
-    searchUrl: 'https://www.indeed.com/jobs?q=',
-    titleSelector: '.jobTitle',
-    companySelector: '.companyName',
-    descriptionSelector: '.job-snippet',
-    linkSelector: '.jcs-JobTitle',
-    locationSelector: '.companyLocation',
-    datePostedSelector: '.date',
-    locationParam: '&l='
-  },
-  linkedin: {
-    searchUrl: 'https://www.linkedin.com/jobs/search/?keywords=',
-    titleSelector: '.job-card-list__title',
-    companySelector: '.job-card-container__company-name',
-    descriptionSelector: '.job-card-list__description',
-    linkSelector: '.job-card-list__title',
-    locationSelector: '.job-card-container__metadata-item',
-    datePostedSelector: '.job-card-container__posted-date',
-    locationParam: '&location='
   }
 };
 
@@ -450,50 +430,58 @@ export const scrapeJobs = async (
   location: string = 'Perth, WA'
 ): Promise<Job[]> => {
   console.log(`Scraping jobs with search terms: ${searchTerms} in location: ${location}`);
-  let allJobs: Job[] = [];
   
   // Shuffle the order of sites and terms to appear less predictable
   const shuffledSites = [...sites].sort(() => Math.random() - 0.5);
   const shuffledTerms = [...searchTerms].sort(() => Math.random() - 0.5);
   
-  console.log(`Scraping in randomized order: Terms: ${shuffledTerms.join(', ')}, Sites: ${shuffledSites.join(', ')}`);
+  console.log(`Scraping in randomized order - Terms: ${shuffledTerms.join(', ')}, Sites: ${shuffledSites.join(', ')}`);
   
   // Initial delay before starting the whole scraping process
   const initialProcessDelay = randomDelay(2000, 5000);
   console.log(`Initial delay before starting scraping process: ${initialProcessDelay}ms`);
   await delay(initialProcessDelay);
   
+  // Create an array of scraping tasks
+  const scrapingTasks: Promise<Job[]>[] = [];
+  
+  // Generate all scraping tasks without waiting for each one
   for (const term of shuffledTerms) {
-    // Delay between searching different terms
-    const termDelay = randomDelay(3000, 8000);
-    console.log(`Delay before searching new term "${term}": ${termDelay}ms`);
-    await delay(termDelay);
-    
     for (const site of shuffledSites) {
-      try {
-        // Add random delay between scraping different sites
-        const siteSwitchDelay = randomDelay(3500, 7000);
-        console.log(`Delay before scraping ${site} for term "${term}": ${siteSwitchDelay}ms`);
-        await delay(siteSwitchDelay);
+      // Create a function that includes all the delays and scraping for this term/site
+      const scrapingTask = async (): Promise<Job[]> => {
+        console.log(`Starting parallel scraping for term "${term}" on site "${site}"`);
         
-        const jobs = await scrapeJobSite(site, term, location, pageLimit);
-        
-        // Small delay after getting results before processing them
-        const postResultDelay = randomDelay(500, 1500);
-        console.log(`Delay after receiving results: ${postResultDelay}ms`);
-        await delay(postResultDelay);
-        
-        allJobs.push(...jobs);
-      } catch (error) {
-        console.error(`Error scraping ${site} for term "${term}":`, error);
-        
-        // Add delay after error before trying next site
-        const errorRecoveryDelay = randomDelay(5000, 10000);
-        console.log(`Error recovery delay: ${errorRecoveryDelay}ms`);
-        await delay(errorRecoveryDelay);
-      }
+        try {
+          // Add random delay before scraping to avoid hitting the site at exactly the same time
+          // This makes parallel scraping less detectable
+          const siteSwitchDelay = randomDelay(1000, 3000);
+          console.log(`Delay before scraping ${site} for term "${term}": ${siteSwitchDelay}ms`);
+          await delay(siteSwitchDelay);
+          
+          const jobs = await scrapeJobSite(site, term, location, pageLimit);
+          
+          console.log(`Completed scraping ${site} for term "${term}": found ${jobs.length} jobs`);
+          return jobs;
+        } catch (error) {
+          console.error(`Error scraping ${site} for term "${term}":`, error);
+          
+          // Return empty array on error so other scraping tasks can continue
+          return [];
+        }
+      };
+      
+      // Add the scraping task to our array
+      scrapingTasks.push(scrapingTask());
     }
   }
+  
+  // Execute all scraping tasks in parallel and wait for all to complete
+  console.log(`Executing ${scrapingTasks.length} scraping tasks in parallel`);
+  const jobArrays = await Promise.all(scrapingTasks);
+  
+  // Combine all job arrays into a single array
+  const allJobs = jobArrays.flat();
   
   // Delay before deduplication process
   const preDedupDelay = randomDelay(1000, 2000);

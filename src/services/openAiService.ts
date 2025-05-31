@@ -133,4 +133,54 @@ const mockEvaluateJobMatch = async (job: Job, resume: Resume): Promise<number> =
   
   // Cap the score between 0-100
   return Math.min(100, Math.max(0, score));
+};
+
+/**
+ * Evaluate multiple job matches in bulk
+ */
+export const evaluateJobMatchesBulk = async (jobs: Job[], resume: Resume): Promise<Record<string, number>> => {
+  console.log(`Evaluating ${jobs.length} jobs in bulk`);
+  
+  try {
+    // Call backend API
+    const response = await axios.post(`${API_URL}/openai/evaluate-job-matches-bulk`, { jobs, resume });
+    
+    if (response.data && response.data.data && Array.isArray(response.data.data)) {
+      // Convert array of results to a map of jobId -> matchScore
+      const resultsMap: Record<string, number> = {};
+      response.data.data.forEach((result: { id: string; matchScore: number }) => {
+        resultsMap[result.id] = result.matchScore;
+      });
+      return resultsMap;
+    } else {
+      throw new Error('Invalid response format from API');
+    }
+  } catch (error) {
+    console.error('Error calling OpenAI bulk API:', error);
+    
+    // Fallback to evaluating each job individually when the backend fails
+    console.log('[FALLBACK] Evaluating jobs individually');
+    const resultsMap: Record<string, number> = {};
+    
+    // Process in smaller batches to avoid overwhelming the client
+    const BATCH_SIZE = 3;
+    for (let i = 0; i < jobs.length; i += BATCH_SIZE) {
+      const batch = jobs.slice(i, i + BATCH_SIZE);
+      
+      // Process this batch in parallel
+      await Promise.all(
+        batch.map(async (job) => {
+          try {
+            const score = await mockEvaluateJobMatch(job, resume);
+            resultsMap[job.id] = score;
+          } catch (err) {
+            console.error(`Error evaluating job "${job.title}":`, err);
+            resultsMap[job.id] = 0; // Default score on error
+          }
+        })
+      );
+    }
+    
+    return resultsMap;
+  }
 }; 
