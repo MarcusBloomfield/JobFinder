@@ -4,9 +4,9 @@ WebJobFinder is a web application that helps job seekers find relevant job oppor
 
 ## Application Interface
 
+*Screenshot showing the Job Finder interface with resume upload, search terms selection, and job matching results*
 ![Job Finder Application](JOBS.png)
 
-*Screenshot showing the Job Finder interface with resume upload, search terms selection, and job matching results*
 
 ## Features
 
