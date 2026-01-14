@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import * as openaiService from '../services/openaiService';
+import * as geminiService from '../services/geminiService';
 import { Resume } from '../models/Resume';
 import { Job } from '../models/Job';
 
@@ -26,7 +26,7 @@ export const generateSearchTerms = async (req: Request, res: Response) => {
       });
     }
     
-    const searchTerms = await openaiService.generateSearchTerms(resume);
+    const searchTerms = await geminiService.generateSearchTerms(resume);
     
     res.status(200).json({
       error: false,
@@ -73,7 +73,7 @@ export const evaluateJobMatch = async (req: Request, res: Response) => {
       });
     }
     
-    const matchScore = await openaiService.evaluateJobMatch(job, resume);
+    const matchScore = await geminiService.evaluateJobMatch(job, resume);
     
     res.status(200).json({
       error: false,
@@ -128,13 +128,17 @@ export const evaluateJobMatchesBulk = async (req: Request, res: Response) => {
     
     // Process job evaluations in parallel
     const evaluationPromises = jobs.map(job => 
-      openaiService.evaluateJobMatch(job, resume)
-        .then(matchScore => ({
-          id: job.id,
-          matchScore
-        }))
+      geminiService.evaluateJobMatch(job, resume)
+        .then(matchScore => {
+          console.log(`✓ Successfully evaluated "${job.title}": ${matchScore}%`);
+          return {
+            id: job.id,
+            matchScore
+          };
+        })
         .catch(error => {
-          console.error(`Error evaluating job "${job.title}":`, error);
+          console.error(`✗ Error evaluating job "${job.title}":`, error.message || error);
+          console.error('Full error:', error);
           return {
             id: job.id,
             matchScore: 0,

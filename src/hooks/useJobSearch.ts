@@ -27,7 +27,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [location, setLocation] = useState<string>('Perth, WA');
+  const [location, setLocation] = useState<string>('Australia');
 
   const uploadResume = async (file: File): Promise<void> => {
     setIsLoading(true);

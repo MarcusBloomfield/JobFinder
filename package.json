@@ -9,7 +9,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "setup-backend": "node setup-backend.js",
     "backend": "cd backend && npm run dev",
-    "dev": "concurrently \"npm start\" \"npm run backend\""
+    "dev": "concurrently \"npm start\" \"npm run backend\"",
+    "test:gemini": "cd backend && npm run test:gemini"
   },
   "keywords": [],
   "author": "",
