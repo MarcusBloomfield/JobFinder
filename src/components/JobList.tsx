@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Job } from '../models/Job';
 
 interface JobListProps {
@@ -12,12 +12,19 @@ const JobList: React.FC<JobListProps> = ({
   evaluateMatch,
   isLoading
 }) => {
+  const [visitedJobIds, setVisitedJobIds] = useState<Set<string>>(new Set());
+
   const handleJobClick = (job: Job) => {
+    setVisitedJobIds((prev) => {
+      const next = new Set(prev);
+      next.add(job.id);
+      return next;
+    });
     window.open(job.url, '_blank', 'noopener,noreferrer');
   };
 
   const getMatchColor = (score?: number) => {
-    if (!score) return '';
+    if (score === undefined || score === null) return '';
     if (score >= 80) return 'match-high';
     if (score >= 60) return 'match-medium';
     return 'match-low';
@@ -41,7 +48,7 @@ const JobList: React.FC<JobListProps> = ({
               {jobs.map((job) => (
                 <div 
                   key={job.id} 
-                  className="job-card"
+                  className={`job-card ${visitedJobIds.has(job.id) ? 'visited' : ''}`}
                   onClick={() => handleJobClick(job)}
                 >
                   <div className="job-header">
@@ -62,7 +69,7 @@ const JobList: React.FC<JobListProps> = ({
                   </div>
                   
                   <div className="job-card-footer">
-                    <span className="view-details">Visit Job Site</span>
+                    <span className={`view-details ${visitedJobIds.has(job.id) ? 'visited' : ''}`}>Visit Job Site</span>
                     {job.datePosted && <span className="job-date">{job.datePosted}</span>}
                   </div>
                 </div>
