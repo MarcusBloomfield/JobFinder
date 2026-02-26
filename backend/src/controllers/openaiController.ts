@@ -6,10 +6,30 @@ import { Job } from '../models/Job';
 const MAX_BULK_CONCURRENCY = 3;
 const MAX_RETRIES_PER_JOB = 2;
 const RETRY_BASE_DELAY_MS = 750;
+const MAX_RETRY_WAIT_MS = 60000;
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 const clampScore = (score: number): number => Math.max(0, Math.min(100, Math.round(score)));
+
+const compactErrorMessage = (message: string): string => {
+  const firstLine = message.split('\n')[0].trim();
+  return firstLine.slice(0, 300);
+};
+
+const extractRetryDelayMs = (message: string): number | null => {
+  const retryInfoMatch = message.match(/"retryDelay":"(\d+)s"/i);
+  if (retryInfoMatch) {
+    return Number(retryInfoMatch[1]) * 1000;
+  }
+
+  const textMatch = message.match(/Please retry in ([0-9.]+)s/i);
+  if (textMatch) {
+    return Math.round(Number(textMatch[1]) * 1000);
+  }
+
+  return null;
+};
 
 const fallbackMatchScore = (job: Job, resume: Resume): number => {
   const resumeText = resume.content.toLowerCase();
@@ -53,16 +73,25 @@ const evaluateJobWithRetries = async (
     } catch (error) {
       const isLastAttempt = attempt === MAX_RETRIES_PER_JOB;
       const message = error instanceof Error ? error.message : 'Unknown error';
+      const shortMessage = compactErrorMessage(message);
 
       if (isLastAttempt) {
         const fallbackScore = fallbackMatchScore(job, resume);
-        console.error(`FAIL evaluated "${job.title}" after retries. Using fallback score ${fallbackScore}%. Error: ${message}`);
-        return { id: job.id, matchScore: fallbackScore, error: message };
+        console.error(`FAIL evaluated "${job.title}" after retries. Using fallback score ${fallbackScore}%. Error: ${shortMessage}`);
+        return { id: job.id, matchScore: fallbackScore, error: shortMessage };
       }
 
-      const backoff = RETRY_BASE_DELAY_MS * (attempt + 1);
-      console.warn(`Retrying "${job.title}" after error: ${message}. Next attempt in ${backoff}ms`);
-      await sleep(backoff);
+      const exponentialBackoff = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+      const providerRetryDelay = extractRetryDelayMs(message);
+      const effectiveWaitMs = Math.min(
+        MAX_RETRY_WAIT_MS,
+        Math.max(exponentialBackoff, providerRetryDelay || 0) + 250
+      );
+
+      console.warn(
+        `Retrying "${job.title}" after error: ${shortMessage}. Next attempt in ${effectiveWaitMs}ms`
+      );
+      await sleep(effectiveWaitMs);
     }
   }
 

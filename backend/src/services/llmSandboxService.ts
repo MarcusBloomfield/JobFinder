@@ -3,6 +3,7 @@ import { Job } from '../models/Job';
 import * as geminiService from './geminiService';
 
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 20000);
+const LLM_MIN_CALL_INTERVAL_MS = Number(process.env.LLM_MIN_CALL_INTERVAL_MS || 60);
 const MAX_RESUME_CHARS = Number(process.env.LLM_MAX_RESUME_CHARS || 12000);
 const MAX_JOB_DESC_CHARS = Number(process.env.LLM_MAX_JOB_DESC_CHARS || 4000);
 const MAX_SEARCH_TERMS = Number(process.env.LLM_MAX_SEARCH_TERMS || 8);
@@ -11,6 +12,11 @@ const MIN_SEARCH_TERMS = Number(process.env.LLM_MIN_SEARCH_TERMS || 5);
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const PHONE_PATTERN = /\b(?:\+?\d[\d()\-\s]{7,}\d)\b/g;
 const URL_PATTERN = /\bhttps?:\/\/[^\s]+/gi;
+
+let llmCallChain: Promise<void> = Promise.resolve();
+let lastLlmCallAt = 0;
+
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 const sanitizeText = (text: string, maxLength: number): string => {
   const withoutControls = text.replace(/[\u0000-\u001F\u007F]/g, ' ');
@@ -38,6 +44,21 @@ const withTimeout = async <T>(promise: Promise<T>, ms: number): Promise<T> => {
         reject(err);
       });
   });
+};
+
+const runThrottled = async <T>(fn: () => Promise<T>): Promise<T> => {
+  const scheduled = llmCallChain.then(async () => {
+    const now = Date.now();
+    const waitMs = Math.max(0, lastLlmCallAt + LLM_MIN_CALL_INTERVAL_MS - now);
+    if (waitMs > 0) {
+      await sleep(waitMs);
+    }
+    lastLlmCallAt = Date.now();
+  });
+
+  llmCallChain = scheduled.then(() => undefined, () => undefined);
+  await scheduled;
+  return fn();
 };
 
 const sanitizeResume = (resume: Resume): Resume => {
@@ -80,13 +101,17 @@ const validateScore = (score: number): number => {
 
 export const generateSearchTerms = async (resume: Resume): Promise<string[]> => {
   const safeResume = sanitizeResume(resume);
-  const terms = await withTimeout(geminiService.generateSearchTerms(safeResume), LLM_TIMEOUT_MS);
+  const terms = await runThrottled(() =>
+    withTimeout(geminiService.generateSearchTerms(safeResume), LLM_TIMEOUT_MS)
+  );
   return validateSearchTerms(terms);
 };
 
 export const evaluateJobMatch = async (job: Job, resume: Resume): Promise<number> => {
   const safeJob = sanitizeJob(job);
   const safeResume = sanitizeResume(resume);
-  const score = await withTimeout(geminiService.evaluateJobMatch(safeJob, safeResume), LLM_TIMEOUT_MS);
+  const score = await runThrottled(() =>
+    withTimeout(geminiService.evaluateJobMatch(safeJob, safeResume), LLM_TIMEOUT_MS)
+  );
   return validateScore(score);
 };
