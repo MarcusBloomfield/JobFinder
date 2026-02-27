@@ -17,6 +17,7 @@ interface JobSearchState {
 interface JobSearchActions {
   uploadResume: (file: File) => Promise<void>;
   searchJobs: (customTerms?: string[]) => Promise<void>;
+  searchJobsNoAI: (customTerms?: string[]) => Promise<void>;
   evaluateMatch: (jobId: string) => Promise<void>;
   setLocation: (location: string) => void;
 }
@@ -65,7 +66,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       }
       
       // Scrape jobs using the search terms and location
-      const scrapedJobs = await scrapeJobs(termsToUse, ['seek', 'indeed'], 2, location);
+      const scrapedJobs = await scrapeJobs(termsToUse, ['seek'], 2, location);
       
       // If resume is available, evaluate match scores for all jobs at once
       if (resume) {
@@ -87,6 +88,27 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
         setJobs(scrapedJobs);
       }
       
+      setIsLoading(false);
+    } catch (error) {
+      setError('Failed to search for jobs');
+      setIsLoading(false);
+      console.error('Job search error:', error);
+    }
+  };
+
+  const searchJobsNoAI = async (customTerms?: string[]): Promise<void> => {
+    const termsToUse = customTerms || searchTerms;
+    if (!termsToUse.length) {
+      setError('Please provide search terms');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const scrapedJobs = await scrapeJobs(termsToUse, ['seek'], 2, location);
+      setJobs(scrapedJobs);
       setIsLoading(false);
     } catch (error) {
       setError('Failed to search for jobs');
@@ -126,7 +148,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
 
   return [
     { resume, searchTerms, jobs, isLoading, error, location },
-    { uploadResume, searchJobs, evaluateMatch, setLocation: updateLocation }
+    { uploadResume, searchJobs, searchJobsNoAI, evaluateMatch, setLocation: updateLocation }
   ];
 };
 

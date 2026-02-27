@@ -24,24 +24,6 @@ const siteConfigs: Record<string, ScrapeConfig> = {
         salarySelector: '[data-automation="jobSalary"]',
         datePostedSelector: '[data-automation="jobListingDate"]'
     },
-    indeed: {
-        searchUrl: 'https://www.indeed.com/jobs?q=',
-        titleSelector: '.jobTitle',
-        companySelector: '.companyName',
-        descriptionSelector: '.job-snippet',
-        linkSelector: '.jcs-JobTitle',
-        locationSelector: '.companyLocation',
-        datePostedSelector: '.date'
-    },
-    linkedin: {
-        searchUrl: 'https://www.linkedin.com/jobs/search/?keywords=',
-        titleSelector: '.job-card-list__title',
-        companySelector: '.job-card-container__company-name',
-        descriptionSelector: '.job-card-list__description',
-        linkSelector: '.job-card-list__title',
-        locationSelector: '.job-card-container__metadata-item',
-        datePostedSelector: '.job-card-container__posted-date'
-    },
     glassdoor: {
         searchUrl: 'https://www.glassdoor.com/Job/jobs.htm?sc.keyword=',
         titleSelector: '.jobLink',
@@ -147,7 +129,7 @@ const generateMockJobs = (searchTerms: string, location: string = 'Perth, WA'): 
  * Scrape jobs from a specific job site
  */
 export const scrapeJobSite = async (
-    site: 'seek' | 'indeed' | 'linkedin',
+    site: 'seek',
     searchTerms: string,
     pageLimit: number = 1,
     location: string = 'Perth, WA'
@@ -182,7 +164,7 @@ export const scrapeJobSite = async (
  */
 export const scrapeJobs = async (
     searchTerms: string[],
-    sites: ('seek' | 'indeed' | 'linkedin')[] = ['seek', 'indeed'],
+    sites: ('seek')[] = ['seek'],
     pageLimit: number = 1,
     location: string = 'Perth, WA'
 ): Promise<Job[]> => {

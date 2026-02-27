@@ -9,7 +9,7 @@ import './styles/App.css';
 const App: React.FC = () => {
     const [
         {resume, searchTerms, jobs, isLoading, error, location},
-        {uploadResume, searchJobs, evaluateMatch, setLocation}
+        {uploadResume, searchJobs, searchJobsNoAI, evaluateMatch, setLocation}
     ] = useJobSearch();
 
     return (
@@ -58,6 +58,7 @@ const App: React.FC = () => {
                             <SearchTerms
                                 terms={searchTerms}
                                 onSearch={searchJobs}
+                                onSearchNoAI={searchJobsNoAI}
                                 isLoading={isLoading}
                             />
 

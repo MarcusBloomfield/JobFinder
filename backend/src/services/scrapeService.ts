@@ -88,7 +88,7 @@ const siteConfigs: Record<string, ScrapeConfig> = {
  * Scrape jobs from a specific job site
  */
 export const scrapeJobSite = async (
-  site: 'seek' | 'indeed' | 'linkedin',
+  site: 'seek',
   searchTerms: string,
   location: string = 'Perth, WA',
   pageLimit: number = 1
@@ -312,66 +312,6 @@ const extractJobsFromPage = async (
         await delay(processingDelay);
       }
     }
-  } else if (site === 'indeed') {
-    const jobElements = $(config.titleSelector);
-    console.log(`Found ${jobElements.length} job elements on page`);
-    
-    for (let i = 0; i < jobElements.length; i++) {
-      const element = jobElements[i];
-      
-      const title = $(element).text().trim();
-      const url = 'https://www.indeed.com' + $(element).closest('a').attr('href');
-      const company = $(element).closest('.job_seen_beacon').find(config.companySelector).text().trim();
-      const description = $(element).closest('.job_seen_beacon').find(config.descriptionSelector).text().trim();
-      const location = $(element).closest('.job_seen_beacon').find(config.locationSelector || '').text().trim();
-      const datePosted = $(element).closest('.job_seen_beacon').find(config.datePostedSelector || '').text().trim();
-      
-      jobs.push({
-        id: uuidv4(),
-        title,
-        company,
-        description,
-        url,
-        location,
-        datePosted
-      });
-      
-      // Add small random delay between processing jobs
-      if (i < jobElements.length - 1) {
-        const processingDelay = randomDelay(30, 150);
-        await delay(processingDelay);
-      }
-    }
-  } else if (site === 'linkedin') {
-    const jobElements = $(config.titleSelector);
-    console.log(`Found ${jobElements.length} job elements on page`);
-    
-    for (let i = 0; i < jobElements.length; i++) {
-      const element = jobElements[i];
-      
-      const title = $(element).text().trim();
-      const url = $(element).attr('href') || '';
-      const company = $(element).closest('.job-card-container').find(config.companySelector).text().trim();
-      const description = $(element).closest('.job-card-container').find(config.descriptionSelector).text().trim();
-      const location = $(element).closest('.job-card-container').find(config.locationSelector || '').text().trim();
-      const datePosted = $(element).closest('.job-card-container').find(config.datePostedSelector || '').text().trim();
-      
-      jobs.push({
-        id: uuidv4(),
-        title,
-        company,
-        description,
-        url,
-        location,
-        datePosted
-      });
-      
-      // Add small random delay between processing jobs
-      if (i < jobElements.length - 1) {
-        const processingDelay = randomDelay(30, 150);
-        await delay(processingDelay);
-      }
-    }
   }
   
   return jobs;
@@ -386,20 +326,9 @@ const hasNextPageButton = async (page: Page, site: string): Promise<boolean> => 
   console.log(`Delay before checking next page button: ${buttonCheckDelay}ms`);
   await delay(buttonCheckDelay);
   
-  if (site === 'seek') {
-    return await page.evaluate(() => {
-      return document.querySelector('[data-automation="pagination-next"]') !== null;
-    });
-  } else if (site === 'indeed') {
-    return await page.evaluate(() => {
-      return document.querySelector('[data-testid="pagination-page-next"]') !== null;
-    });
-  } else if (site === 'linkedin') {
-    return await page.evaluate(() => {
-      return document.querySelector('.artdeco-pagination__button--next:not(.artdeco-pagination__button--disabled)') !== null;
-    });
-  }
-  return false;
+  return await page.evaluate(() => {
+    return document.querySelector('[data-automation="pagination-next"]') !== null;
+  });
 };
 
 /**
@@ -411,13 +340,7 @@ const clickNextPage = async (page: Page, site: string): Promise<void> => {
   console.log(`Small delay before click action: ${preClickDelay}ms`);
   await delay(preClickDelay);
   
-  if (site === 'seek') {
-    await page.click('[data-automation="pagination-next"]');
-  } else if (site === 'indeed') {
-    await page.click('[data-testid="pagination-page-next"]');
-  } else if (site === 'linkedin') {
-    await page.click('.artdeco-pagination__button--next');
-  }
+  await page.click('[data-automation="pagination-next"]');
 };
 
 /**
@@ -425,7 +348,7 @@ const clickNextPage = async (page: Page, site: string): Promise<void> => {
  */
 export const scrapeJobs = async (
   searchTerms: string[],
-  sites: ('seek' | 'indeed' | 'linkedin')[] = ['seek', 'indeed'],
+  sites: ('seek')[] = ['seek'],
   pageLimit: number = 1,
   location: string = 'Perth, WA'
 ): Promise<Job[]> => {
@@ -442,46 +365,20 @@ export const scrapeJobs = async (
   console.log(`Initial delay before starting scraping process: ${initialProcessDelay}ms`);
   await delay(initialProcessDelay);
   
-  // Create an array of scraping tasks
-  const scrapingTasks: Promise<Job[]>[] = [];
-  
-  // Generate all scraping tasks without waiting for each one
+  const allJobs: Job[] = [];
+
   for (const term of shuffledTerms) {
     for (const site of shuffledSites) {
-      // Create a function that includes all the delays and scraping for this term/site
-      const scrapingTask = async (): Promise<Job[]> => {
-        console.log(`Starting parallel scraping for term "${term}" on site "${site}"`);
-        
-        try {
-          // Add random delay before scraping to avoid hitting the site at exactly the same time
-          // This makes parallel scraping less detectable
-          const siteSwitchDelay = randomDelay(1000, 3000);
-          console.log(`Delay before scraping ${site} for term "${term}": ${siteSwitchDelay}ms`);
-          await delay(siteSwitchDelay);
-          
-          const jobs = await scrapeJobSite(site, term, location, pageLimit);
-          
-          console.log(`Completed scraping ${site} for term "${term}": found ${jobs.length} jobs`);
-          return jobs;
-        } catch (error) {
-          console.error(`Error scraping ${site} for term "${term}":`, error);
-          
-          // Return empty array on error so other scraping tasks can continue
-          return [];
-        }
-      };
-      
-      // Add the scraping task to our array
-      scrapingTasks.push(scrapingTask());
+      console.log(`Scraping "${term}" on ${site}`);
+      try {
+        const jobs = await scrapeJobSite(site, term, location, pageLimit);
+        console.log(`Completed scraping ${site} for term "${term}": found ${jobs.length} jobs`);
+        allJobs.push(...jobs);
+      } catch (error) {
+        console.error(`Error scraping ${site} for term "${term}":`, error);
+      }
     }
   }
-  
-  // Execute all scraping tasks in parallel and wait for all to complete
-  console.log(`Executing ${scrapingTasks.length} scraping tasks in parallel`);
-  const jobArrays = await Promise.all(scrapingTasks);
-  
-  // Combine all job arrays into a single array
-  const allJobs = jobArrays.flat();
   
   // Delay before deduplication process
   const preDedupDelay = randomDelay(1000, 2000);

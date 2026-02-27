@@ -3,10 +3,11 @@ import React, { useState } from 'react';
 interface SearchTermsProps {
   terms: string[];
   onSearch: (terms?: string[]) => Promise<void>;
+  onSearchNoAI: (terms?: string[]) => Promise<void>;
   isLoading: boolean;
 }
 
-const SearchTerms: React.FC<SearchTermsProps> = ({ terms, onSearch, isLoading }) => {
+const SearchTerms: React.FC<SearchTermsProps> = ({ terms, onSearch, onSearchNoAI, isLoading }) => {
   const [editMode, setEditMode] = useState<boolean>(false);
   const [customTerms, setCustomTerms] = useState<string>(terms.join(', '));
 
@@ -19,9 +20,20 @@ const SearchTerms: React.FC<SearchTermsProps> = ({ terms, onSearch, isLoading })
       .split(',')
       .map(term => term.trim())
       .filter(term => term.length > 0);
-    
+
     if (trimmedTerms.length > 0) {
       onSearch(trimmedTerms);
+    }
+  };
+
+  const handleCustomSearchNoAI = () => {
+    const trimmedTerms = customTerms
+      .split(',')
+      .map(term => term.trim())
+      .filter(term => term.length > 0);
+
+    if (trimmedTerms.length > 0) {
+      onSearchNoAI(trimmedTerms);
     }
   };
 
@@ -55,12 +67,19 @@ const SearchTerms: React.FC<SearchTermsProps> = ({ terms, onSearch, isLoading })
             disabled={isLoading}
           />
           <div className="buttons">
-            <button 
-              onClick={handleCustomSearch} 
+            <button
+              onClick={handleCustomSearch}
               className="search-button"
               disabled={isLoading || customTerms.trim().length === 0}
             >
               {isLoading ? 'Searching...' : 'Search with Custom Terms'}
+            </button>
+            <button
+              onClick={handleCustomSearchNoAI}
+              className="search-button-no-ai"
+              disabled={isLoading || customTerms.trim().length === 0}
+            >
+              {isLoading ? 'Searching...' : 'Search without AI'}
             </button>
           </div>
         </div>
@@ -75,13 +94,22 @@ const SearchTerms: React.FC<SearchTermsProps> = ({ terms, onSearch, isLoading })
                   </span>
                 ))}
               </div>
-              <button 
-                onClick={handleSearch} 
-                className="search-button"
-                disabled={isLoading || terms.length === 0}
-              >
-                {isLoading ? 'Searching...' : 'Search Jobs'}
-              </button>
+              <div className="buttons">
+                <button
+                  onClick={handleSearch}
+                  className="search-button"
+                  disabled={isLoading || terms.length === 0}
+                >
+                  {isLoading ? 'Searching...' : 'Search Jobs'}
+                </button>
+                <button
+                  onClick={() => onSearchNoAI()}
+                  className="search-button-no-ai"
+                  disabled={isLoading || terms.length === 0}
+                >
+                  {isLoading ? 'Searching...' : 'Search without AI'}
+                </button>
+              </div>
             </>
           ) : (
             <p className="no-terms">

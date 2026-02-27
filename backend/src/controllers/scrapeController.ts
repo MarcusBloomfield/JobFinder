@@ -17,7 +17,7 @@ export const scrapeJobSite = async (req: Request, res: Response) => {
     }
     
     // Validate site parameter
-    const validSites = ['seek', 'indeed', 'linkedin'];
+    const validSites = ['seek'];
     if (!validSites.includes(site)) {
       return res.status(400).json({ 
         error: true, 
@@ -64,7 +64,7 @@ export const scrapeJobs = async (req: Request, res: Response) => {
     }
     
     // Validate sites array if provided
-    const validSites = ['seek', 'indeed', 'linkedin'];
+    const validSites = ['seek'];
     let sitesToSearch = sites;
     
     if (sites && Array.isArray(sites)) {

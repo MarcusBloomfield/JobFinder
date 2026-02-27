@@ -269,6 +269,20 @@ textarea {
   background-color: #27ae60;
 }
 
+.search-button-no-ai {
+  background-color: var(--gray-color);
+}
+
+.search-button-no-ai:hover {
+  background-color: #6c7a7d;
+}
+
+.search-terms .buttons {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 /* Job List */
 .job-list-header {
   display: flex;
