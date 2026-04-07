@@ -1,6 +1,6 @@
 import { Resume } from '../models/Resume';
 import { Job } from '../models/Job';
-import * as geminiService from './geminiService';
+import * as openaiService from './openaiService';
 
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 20000);
 const LLM_MIN_CALL_INTERVAL_MS = Number(process.env.LLM_MIN_CALL_INTERVAL_MS || 60);
@@ -102,7 +102,7 @@ const validateScore = (score: number): number => {
 export const generateSearchTerms = async (resume: Resume): Promise<string[]> => {
   const safeResume = sanitizeResume(resume);
   const terms = await runThrottled(() =>
-    withTimeout(geminiService.generateSearchTerms(safeResume), LLM_TIMEOUT_MS)
+    withTimeout(openaiService.generateSearchTerms(safeResume), LLM_TIMEOUT_MS)
   );
   return validateSearchTerms(terms);
 };
@@ -111,7 +111,7 @@ export const evaluateJobMatch = async (job: Job, resume: Resume): Promise<number
   const safeJob = sanitizeJob(job);
   const safeResume = sanitizeResume(resume);
   const score = await runThrottled(() =>
-    withTimeout(geminiService.evaluateJobMatch(safeJob, safeResume), LLM_TIMEOUT_MS)
+    withTimeout(openaiService.evaluateJobMatch(safeJob, safeResume), LLM_TIMEOUT_MS)
   );
   return validateScore(score);
 };

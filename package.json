@@ -10,7 +10,7 @@
     "setup-backend": "node setup-backend.js",
     "backend": "cd backend && npm run dev",
     "dev": "concurrently \"npm start\" \"npm run backend\"",
-    "test:gemini": "cd backend && npm run test:gemini"
+    "test:openai": "cd backend && npm run test:openai"
   },
   "keywords": [],
   "author": "",

@@ -25,11 +25,11 @@ cd backend
 ```
 npm install
 ```
-4. Create a `.env` file based on `.env.example` and add your Gemini API key:
+4. Create a `.env` file based on `.env.example` and add your OpenAI API key:
 ```
 PORT=5000
 NODE_ENV=development
-GEMINI_API_KEY=your_gemini_api_key_here
+OPENAI_API_KEY=your_openai_api_key_here
 LLM_TIMEOUT_MS=20000
 LLM_MAX_RESUME_CHARS=12000
 LLM_MAX_JOB_DESC_CHARS=4000
@@ -71,7 +71,6 @@ npm start
 - `POST /api/resume/parse` - Parse and extract information from a resume file
 
 ### AI Integration (Sandboxed)
-- `POST /api/openai/init` - Initialize OpenAI with API key
 - `POST /api/openai/generate-search-terms` - Generate job search terms from a resume
 - `POST /api/openai/evaluate-job-match` - Evaluate how well a job matches a resume
 - `POST /api/openai/evaluate-job-matches-bulk` - Evaluate multiple jobs with sandboxed LLM calls

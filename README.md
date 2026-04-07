@@ -95,7 +95,7 @@ This project consists of two main parts:
 ## Usage
 
 1. Start both the frontend and backend servers
-2. Enter your OpenAI API key when prompted (or configure it in the backend .env file)
+2. Configure your OpenAI API key in `backend/.env`
 3. Upload your resume (PDF or DOCX format)
 4. Review the generated search terms or add your own
 5. Click "Search Jobs" to find matching jobs

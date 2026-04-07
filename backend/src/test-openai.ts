@@ -3,10 +3,8 @@ import { Resume } from './models/Resume';
 import { Job } from './models/Job';
 import dotenv from 'dotenv';
 
-// Load environment variables
 dotenv.config();
 
-// Fake resume data
 const fakeResume: Resume = {
   id: 'test-resume-1',
   fileName: 'test-resume.pdf',
@@ -44,7 +42,6 @@ Bachelor of Computer Science | University of Technology | 2018
   generatedSearchTerms: []
 };
 
-// Fake job data - should be a good match
 const goodMatchJob: Job = {
   id: 'test-job-1',
   title: 'Senior React Developer',
@@ -77,7 +74,6 @@ Nice to have:
   datePosted: new Date().toISOString()
 };
 
-// Fake job data - should be a poor match
 const poorMatchJob: Job = {
   id: 'test-job-2',
   title: 'Senior Data Scientist',
@@ -106,79 +102,72 @@ Responsibilities:
 };
 
 async function runTest() {
-  console.log('🧪 Testing Gemini Match Percentage Functionality\n');
-  console.log('=' .repeat(60));
-  
-  // Check if API key is set
-  if (!process.env.GEMINI_API_KEY) {
-    console.error('❌ ERROR: GEMINI_API_KEY is not set!');
-    console.error('Please set GEMINI_API_KEY in your system environment variables or backend/.env');
+  console.log('Testing OpenAI match scoring\n');
+  console.log('='.repeat(60));
+
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('ERROR: OPENAI_API_KEY is not set.');
+    console.error('Set OPENAI_API_KEY in your system environment variables or backend/.env');
     process.exit(1);
   }
-  
-  console.log('✓ Gemini API key found\n');
-  
+
+  console.log('OpenAI API key found\n');
+
   try {
-    // Test 1: Good match job
     console.log('Test 1: Evaluating GOOD MATCH job');
     console.log('-'.repeat(60));
     console.log(`Job: ${goodMatchJob.title} at ${goodMatchJob.company}`);
     console.log('Expected: High match score (70-100%)');
-    
+
     const goodMatchScore = await evaluateJobMatch(goodMatchJob, fakeResume);
     console.log(`Result: ${goodMatchScore}%`);
-    
+
     if (goodMatchScore >= 70) {
-      console.log('✅ PASS: Good match detected correctly\n');
+      console.log('PASS: Good match detected correctly\n');
     } else if (goodMatchScore > 0) {
-      console.log('⚠️  WARNING: Score is lower than expected but API is working\n');
+      console.log('WARNING: Score is lower than expected, but the API is working\n');
     } else {
-      console.log('❌ FAIL: Score is 0%, API may not be working\n');
+      console.log('FAIL: Score is 0%, API may not be working\n');
     }
-    
-    // Test 2: Poor match job
+
     console.log('Test 2: Evaluating POOR MATCH job');
     console.log('-'.repeat(60));
     console.log(`Job: ${poorMatchJob.title} at ${poorMatchJob.company}`);
     console.log('Expected: Low match score (0-40%)');
-    
+
     const poorMatchScore = await evaluateJobMatch(poorMatchJob, fakeResume);
     console.log(`Result: ${poorMatchScore}%`);
-    
+
     if (poorMatchScore <= 40) {
-      console.log('✅ PASS: Poor match detected correctly\n');
+      console.log('PASS: Poor match detected correctly\n');
     } else if (poorMatchScore > 0) {
-      console.log('⚠️  WARNING: Score is higher than expected but API is working\n');
+      console.log('WARNING: Score is higher than expected, but the API is working\n');
     } else {
-      console.log('❌ FAIL: Score is 0%, API may not be working\n');
+      console.log('FAIL: Score is 0%, API may not be working\n');
     }
-    
-    // Summary
-    console.log('=' .repeat(60));
-    console.log('📊 TEST SUMMARY');
-    console.log('=' .repeat(60));
-    
+
+    console.log('='.repeat(60));
+    console.log('TEST SUMMARY');
+    console.log('='.repeat(60));
+
     if (goodMatchScore > 0 && poorMatchScore >= 0) {
-      console.log('✅ Gemini API is working correctly!');
-      console.log(`   Good match score: ${goodMatchScore}%`);
-      console.log(`   Poor match score: ${poorMatchScore}%`);
-      
+      console.log('OpenAI API is responding.');
+      console.log(`Good match score: ${goodMatchScore}%`);
+      console.log(`Poor match score: ${poorMatchScore}%`);
+
       if (goodMatchScore > poorMatchScore) {
-        console.log('✅ Match scoring logic is working as expected!');
+        console.log('Match scoring logic appears consistent.');
       } else {
-        console.log('⚠️  Match scores may need tuning, but API is functional');
+        console.log('Match scores may need tuning, but the API is functional.');
       }
     } else {
-      console.log('❌ Gemini API is NOT working properly');
-      console.log('   All scores are 0% - check your API key and error logs above');
+      console.log('OpenAI API is not working as expected.');
     }
-    
   } catch (error) {
-    console.error('\n❌ TEST FAILED WITH ERROR:');
+    console.error('\nTEST FAILED WITH ERROR:');
     console.error(error);
     process.exit(1);
   }
 }
 
-// Run the test
 runTest();
