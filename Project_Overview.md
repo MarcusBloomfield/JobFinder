@@ -6,7 +6,7 @@
 
 ## What This Project Is
 
-**WebJobFinder** is a full-stack TypeScript application that helps job seekers find relevant listings. The user uploads a resume (PDF or DOCX), the app generates search terms via Google Gemini, scrapes job listings from job boards using Puppeteer, scores each job against the resume using Gemini, and displays ranked results with match percentages in a React UI.
+**WebJobFinder** is a full-stack TypeScript application that helps job seekers find relevant listings. The user uploads a resume (PDF or DOCX), the app generates search terms via Google Gemini, scrapes job listings from job boards using Playwright, scores each job against the resume using Gemini, and displays ranked results with match percentages in a React UI.
 
 ---
 
@@ -30,7 +30,7 @@
 | Express.js | 4 | Web server |
 | TypeScript | 5.8 | Type safety |
 | Node.js | 20 | Runtime |
-| Puppeteer | 24 | Browser automation / scraping |
+| Playwright | 1.60 | Browser automation / scraping |
 | Cheerio | 1 | HTML parsing |
 | Multer | 1.4 | File upload handling |
 | pdf-parse | 1.1 | PDF text extraction |
@@ -80,7 +80,7 @@ JobFinder/
 │   │   │   └── openaiController.ts
 │   │   ├── services/
 │   │   │   ├── resumeParserService.ts  # pdf-parse + mammoth
-│   │   │   ├── scrapeService.ts        # Puppeteer + Cheerio, human-like delays
+│   │   │   ├── scrapeService.ts        # Playwright + Cheerio, human-like delays
 │   │   │   ├── geminiService.ts        # Gemini API calls
 │   │   │   ├── llmSandboxService.ts    # Sanitization, rate-limit, retry, fallback
 │   │   │   └── openaiService.ts        # Legacy — not actively used
@@ -180,7 +180,7 @@ JobFinder/
 - User clicks "Search Jobs" (or submits custom terms)
 - `POST /api/scrape/jobs` with `{ searchTerms, sites, location, pageLimit }`
 - Backend iterates all `searchTerm × site` combinations
-- Each combination: Puppeteer launches headless Chrome → human-like delays, random UA, scrolling → Cheerio extracts jobs
+- Each combination: Playwright launches headless Chromium → human-like delays, random UA, scrolling → Cheerio extracts jobs
 - Results deduplicated by `title + company`
 - **Only Seek is fully configured.** Passing `indeed` or `linkedin` throws `"Scraping configuration not found"` and triggers frontend fallback
 

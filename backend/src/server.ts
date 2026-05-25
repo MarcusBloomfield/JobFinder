@@ -8,6 +8,7 @@ import path from 'path';
 import scrapeRoutes from './routes/scrapeRoutes';
 import resumeRoutes from './routes/resumeRoutes';
 import openaiRoutes from './routes/openaiRoutes';
+import applicationRoutes from './routes/applicationRoutes';
 
 // Load environment variables
 dotenv.config();
@@ -19,11 +20,13 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 app.use(morgan('dev'));
+app.use('/artifacts', express.static(path.join(__dirname, '../.playwright')));
 
 // Routes
 app.use('/api/scrape', scrapeRoutes);
 app.use('/api/resume', resumeRoutes);
 app.use('/api/openai', openaiRoutes);
+app.use('/api/apply', applicationRoutes);
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {

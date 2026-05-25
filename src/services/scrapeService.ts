@@ -132,7 +132,8 @@ export const scrapeJobSite = async (
     site: 'seek',
     searchTerms: string,
     pageLimit: number = 1,
-    location: string = 'Perth, WA'
+    location: string = 'Perth, WA',
+    maxJobs?: number
 ): Promise<Job[]> => {
     console.log(`Scraping ${site} with search terms: ${searchTerms} in location: ${location}`);
 
@@ -141,7 +142,8 @@ export const scrapeJobSite = async (
             site,
             searchTerms,
             pageLimit,
-            location
+            location,
+            maxJobs
         });
 
         if (response.data && response.data.data) {
@@ -166,7 +168,8 @@ export const scrapeJobs = async (
     searchTerms: string[],
     sites: ('seek')[] = ['seek'],
     pageLimit: number = 1,
-    location: string = 'Perth, WA'
+    location: string = 'Perth, WA',
+    maxJobs?: number
 ): Promise<Job[]> => {
     console.log(`Scraping jobs with search terms: ${searchTerms} in location: ${location}`);
 
@@ -175,7 +178,8 @@ export const scrapeJobs = async (
             searchTerms,
             sites,
             pageLimit,
-            location
+            location,
+            maxJobs
         });
 
         if (response.data && response.data.data) {
@@ -202,6 +206,6 @@ export const scrapeJobs = async (
             new Map(allJobs.map(job => [`${job.title}-${job.company}`, job])).values()
         );
 
-        return uniqueJobs;
+        return typeof maxJobs === 'number' ? uniqueJobs.slice(0, maxJobs) : uniqueJobs;
     }
 }; 

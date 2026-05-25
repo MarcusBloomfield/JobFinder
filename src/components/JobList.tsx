@@ -4,12 +4,14 @@ import { Job } from '../models/Job';
 interface JobListProps {
   jobs: Job[];
   evaluateMatch: (jobId: string) => Promise<void>;
+  applyToJob: (jobId: string) => Promise<void>;
   isLoading: boolean;
 }
 
 const JobList: React.FC<JobListProps> = ({
   jobs,
   evaluateMatch,
+  applyToJob,
   isLoading
 }) => {
   const [visitedJobIds, setVisitedJobIds] = useState<Set<string>>(new Set());
@@ -28,6 +30,21 @@ const JobList: React.FC<JobListProps> = ({
     if (score >= 80) return 'match-high';
     if (score >= 60) return 'match-medium';
     return 'match-low';
+  };
+
+  const getApplicationStatusClass = (status?: Job['applicationStatus']) => {
+    switch (status) {
+      case 'applied':
+        return 'application-status applied';
+      case 'review_required':
+        return 'application-status review-required';
+      case 'failed':
+        return 'application-status failed';
+      case 'applying':
+        return 'application-status applying';
+      default:
+        return 'application-status';
+    }
   };
 
   return (
@@ -67,6 +84,71 @@ const JobList: React.FC<JobListProps> = ({
                     {job.description.substring(0, 150)}
                     {job.description.length > 150 && '...'}
                   </div>
+
+                  <div className="job-card-actions">
+                    <button
+                      className="auto-apply-button"
+                      disabled={job.applicationStatus === 'applying'}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void applyToJob(job.id);
+                      }}
+                    >
+                      {job.applicationStatus === 'applying' ? 'Applying...' : 'Auto Apply'}
+                    </button>
+                    {job.applicationStatus && job.applicationStatus !== 'idle' && (
+                      <div className={getApplicationStatusClass(job.applicationStatus)}>
+                        {job.applicationStatus === 'review_required'
+                          ? 'Needs Review'
+                          : job.applicationStatus.charAt(0).toUpperCase() + job.applicationStatus.slice(1)}
+                      </div>
+                    )}
+                  </div>
+
+                  {job.applicationMessage && (
+                    <div className="application-message">{job.applicationMessage}</div>
+                  )}
+
+                  {job.applicationLogs && job.applicationLogs.length > 0 && (
+                    <details
+                      className="application-logs"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <summary>Application Log</summary>
+                      <ul>
+                        {job.applicationLogs.map((log, index) => (
+                          <li key={`${job.id}-log-${index}`}>{log}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+
+                  {job.applicationArtifacts && job.applicationArtifacts.length > 0 && (
+                    <details
+                      className="application-artifacts"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <summary>Screenshots</summary>
+                      <div className="application-artifact-grid">
+                        {job.applicationArtifacts.map((artifact, index) => (
+                          <a
+                            key={`${job.id}-artifact-${index}`}
+                            className="application-artifact-card"
+                            href={artifact.url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <img
+                              src={artifact.url}
+                              alt={artifact.label}
+                              loading="lazy"
+                            />
+                            <span>{artifact.label}</span>
+                          </a>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                   
                   <div className="job-card-footer">
                     <span className={`view-details ${visitedJobIds.has(job.id) ? 'visited' : ''}`}>Visit Job Site</span>

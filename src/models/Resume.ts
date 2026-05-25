@@ -3,6 +3,7 @@ export interface Resume {
   fileName: string;
   fileType: 'pdf' | 'docx';
   content: string;
+  storedFileName?: string;
   skills?: string[];
   experience?: string[];
   education?: string[];

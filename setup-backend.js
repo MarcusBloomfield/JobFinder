@@ -24,7 +24,12 @@ try {
     const envContent = `PORT=5000
 NODE_ENV=development
 # Add your OpenAI API key here
-OPENAI_API_KEY=`;
+OPENAI_API_KEY=
+PLAYWRIGHT_HEADLESS=false
+PLAYWRIGHT_SLOWMO_MS=250
+PLAYWRIGHT_BROWSER_CHANNEL=chrome
+# Optional: reuse an existing Chrome profile. Close Chrome first if you point at a live profile.
+# PLAYWRIGHT_USER_DATA_DIR=C:\\Users\\your-user\\AppData\\Local\\Google\\Chrome\\User Data`;
     fs.writeFileSync(envFile, envContent);
     console.log('Created .env file. Please add your OpenAI API key to the .env file.');
   } else {

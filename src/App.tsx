@@ -2,14 +2,15 @@ import React, {useState} from 'react';
 import ResumeUploader from './components/ResumeUploader';
 import SearchTerms from './components/SearchTerms';
 import LocationSelector from './components/LocationSelector';
+import JobSearchAmountSelector from './components/JobSearchAmountSelector';
 import JobList from './components/JobList';
 import useJobSearch from './hooks/useJobSearch';
 import './styles/App.css';
 // Main App component for the Job Finder application, providing the UI and logic integration
 const App: React.FC = () => {
     const [
-        {resume, searchTerms, jobs, isLoading, error, location},
-        {uploadResume, searchJobs, searchJobsNoAI, evaluateMatch, setLocation}
+        {resume, searchTerms, jobs, isLoading, error, location, jobSearchAmount, seekLoginMessage, isSeekLoginLoading},
+        {uploadResume, searchJobs, searchJobsNoAI, evaluateMatch, applyToJob, loginToSeek, setLocation, setJobSearchAmount}
     ] = useJobSearch();
 
     return (
@@ -23,6 +24,16 @@ const App: React.FC = () => {
 
                 <div className="resume-section">
                     <h2>Resume</h2>
+                    <div className="seek-login-row">
+                        <button
+                            className="seek-login-button"
+                            disabled={isSeekLoginLoading}
+                            onClick={() => void loginToSeek()}
+                        >
+                            {isSeekLoginLoading ? 'Opening Seek Login...' : 'Login to Seek'}
+                        </button>
+                        {seekLoginMessage && <p className="seek-login-message">{seekLoginMessage}</p>}
+                    </div>
                     {resume ? (
                         <div className="resume-info">
                             <div className="resume-file-info">
@@ -67,12 +78,19 @@ const App: React.FC = () => {
                                 onLocationChange={setLocation}
                                 isLoading={isLoading}
                             />
+
+                            <JobSearchAmountSelector
+                                amount={jobSearchAmount}
+                                onAmountChange={setJobSearchAmount}
+                                isLoading={isLoading}
+                            />
                         </div>
 
                         <div className="results-section">
                             <JobList
                                 jobs={jobs}
                                 evaluateMatch={evaluateMatch}
+                                applyToJob={applyToJob}
                                 isLoading={isLoading}
                             />
                         </div>

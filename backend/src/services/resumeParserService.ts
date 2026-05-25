@@ -89,6 +89,7 @@ export const parseResume = async (file: any): Promise<Resume> => {
       fileName: file.originalname,
       fileType: fileType,
       content: content,
+      storedFileName: file.filename,
       skills,
       experience,
       education
@@ -97,9 +98,6 @@ export const parseResume = async (file: any): Promise<Resume> => {
     console.error('Error parsing resume:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     throw new Error(`Failed to parse resume: ${errorMessage}`);
-  } finally {
-    // Clean up the temporary file
-    fs.unlinkSync(file.path);
   }
 };
 

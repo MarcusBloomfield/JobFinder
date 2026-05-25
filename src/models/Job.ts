@@ -9,4 +9,13 @@ export interface Job {
   datePosted?: string;
   matchScore?: number;
   isFavorite?: boolean;
+  applicationStatus?: 'idle' | 'applying' | 'applied' | 'review_required' | 'failed';
+  applicationMessage?: string;
+  applicationLogs?: string[];
+  applicationArtifacts?: Array<{
+    step: number;
+    label: string;
+    filePath: string;
+    url: string;
+  }>;
 } 

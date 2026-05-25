@@ -7,7 +7,7 @@ import * as scrapeService from '../services/scrapeService';
  */
 export const scrapeJobSite = async (req: Request, res: Response) => {
   try {
-    const { site, searchTerms, pageLimit, location } = req.body;
+    const { site, searchTerms, pageLimit, location, maxJobs } = req.body;
     
     if (!site || !searchTerms) {
       return res.status(400).json({ 
@@ -27,12 +27,13 @@ export const scrapeJobSite = async (req: Request, res: Response) => {
     
     // Convert pageLimit to number if it's provided
     const limit = pageLimit ? parseInt(pageLimit, 10) : 1;
+    const requestedMaxJobs = maxJobs ? parseInt(maxJobs, 10) : undefined;
     
     // Default location to Perth, WA if not provided
     const locationToUse = location || 'Perth, WA';
     
     // Call the scrape service
-    const jobs = await scrapeService.scrapeJobSite(site, searchTerms, locationToUse, limit);
+    const jobs = await scrapeService.scrapeJobSite(site, searchTerms, locationToUse, limit, requestedMaxJobs);
     
     res.status(200).json({
       error: false,
@@ -54,7 +55,7 @@ export const scrapeJobSite = async (req: Request, res: Response) => {
  */
 export const scrapeJobs = async (req: Request, res: Response) => {
   try {
-    const { searchTerms, sites, pageLimit, location } = req.body;
+    const { searchTerms, sites, pageLimit, location, maxJobs } = req.body;
     
     if (!searchTerms || !Array.isArray(searchTerms)) {
       return res.status(400).json({ 
@@ -82,12 +83,13 @@ export const scrapeJobs = async (req: Request, res: Response) => {
     
     // Convert pageLimit to number if it's provided
     const limit = pageLimit ? parseInt(pageLimit, 10) : 1;
+    const requestedMaxJobs = maxJobs ? parseInt(maxJobs, 10) : undefined;
     
     // Default location to Perth, WA if not provided
     const locationToUse = location || 'Perth, WA';
     
     // Call the scrape service
-    const jobs = await scrapeService.scrapeJobs(searchTerms, sitesToSearch, limit, locationToUse);
+    const jobs = await scrapeService.scrapeJobs(searchTerms, sitesToSearch, limit, locationToUse, requestedMaxJobs);
     
     res.status(200).json({
       error: false,

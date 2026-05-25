@@ -33,7 +33,7 @@ This project consists of two main parts:
 ### Backend
 - Express.js
 - TypeScript
-- Puppeteer for web scraping
+- Playwright for web scraping
 - Cheerio for HTML parsing
 - Multer for file uploads
 - PDF and DOCX parsing libraries
@@ -80,7 +80,16 @@ This project consists of two main parts:
    PORT=5000
    NODE_ENV=development
    OPENAI_API_KEY=your_openai_api_key_here
+   PLAYWRIGHT_HEADLESS=false
+   PLAYWRIGHT_SLOWMO_MS=250
+   PLAYWRIGHT_BROWSER_CHANNEL=chrome
    ```
+
+   To reuse your real Chrome profile and stay logged into sites, also set:
+   ```
+   PLAYWRIGHT_USER_DATA_DIR=C:\Users\your-user\AppData\Local\Google\Chrome\User Data
+   ```
+   Close Chrome first before using its live profile directory.
 
 4. Build the TypeScript code:
    ```

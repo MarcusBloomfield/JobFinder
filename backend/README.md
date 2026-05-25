@@ -30,12 +30,18 @@ npm install
 PORT=5000
 NODE_ENV=development
 OPENAI_API_KEY=your_openai_api_key_here
+PLAYWRIGHT_HEADLESS=false
+PLAYWRIGHT_SLOWMO_MS=250
+PLAYWRIGHT_BROWSER_CHANNEL=chrome
+# Optional: reuse your real Chrome profile. Close Chrome first if you use a live profile.
+# PLAYWRIGHT_USER_DATA_DIR=C:\Users\your-user\AppData\Local\Google\Chrome\User Data
 LLM_TIMEOUT_MS=20000
 LLM_MAX_RESUME_CHARS=12000
 LLM_MAX_JOB_DESC_CHARS=4000
 LLM_MIN_SEARCH_TERMS=5
 LLM_MAX_SEARCH_TERMS=8
 ```
+
 5. Build the TypeScript code:
 ```
 npm run build
@@ -79,7 +85,7 @@ npm start
 
 - Express.js
 - TypeScript
-- Puppeteer (for web scraping)
+- Playwright (for web scraping)
 - Cheerio (for HTML parsing)
 - Multer (for file uploads)
 - OpenAI API

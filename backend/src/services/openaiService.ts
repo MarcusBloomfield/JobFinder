@@ -6,23 +6,39 @@ import dotenv from 'dotenv';
 // Load environment variables
 dotenv.config();
 
-// Initialize OpenAI client with API key from environment variables
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+let openaiClient: OpenAI | null = null;
+let hasWarnedMissingApiKey = false;
 
-// Check if API key is configured
-if (!process.env.OPENAI_API_KEY) {
-  console.warn('WARNING: OPENAI_API_KEY is not set in environment variables. OpenAI features will not work.');
-}
+const getApiKey = (): string | undefined => {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+
+  if (!apiKey && !hasWarnedMissingApiKey) {
+    console.warn('WARNING: OPENAI_API_KEY is not set in environment variables. OpenAI features will not work.');
+    hasWarnedMissingApiKey = true;
+  }
+
+  return apiKey;
+};
+
+const getOpenAIClient = (): OpenAI => {
+  const apiKey = getApiKey();
+
+  if (!apiKey) {
+    throw new Error('OpenAI API key is not configured in server environment variables.');
+  }
+
+  if (!openaiClient) {
+    openaiClient = new OpenAI({ apiKey });
+  }
+
+  return openaiClient;
+};
 
 /**
  * Generate job search terms from resume content
  */
 export const generateSearchTerms = async (resume: Resume): Promise<string[]> => {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OpenAI API key is not configured in server environment variables.');
-  }
+  const openai = getOpenAIClient();
   
   console.log('Generating search terms for resume...');
   console.log('Resume content length:', resume.content.length);
@@ -118,9 +134,7 @@ Based ONLY on the resume content provided above:
  * Evaluate job match quality against resume
  */
 export const evaluateJobMatch = async (job: Job, resume: Resume): Promise<number> => {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OpenAI API key is not configured in server environment variables.');
-  }
+  const openai = getOpenAIClient();
 
   console.log('Evaluating job match:', job.title);
   

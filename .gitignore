@@ -51,6 +51,7 @@ logs/
 # Browser automated testing
 /screenshots/
 /videos/
+/backend/.playwright/
 
 # Generated files
 package-lock.json
