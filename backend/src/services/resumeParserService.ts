@@ -29,6 +29,88 @@ interface MulterFile {
   buffer: Buffer;
 }
 
+const UPLOADS_DIR = path.resolve(__dirname, '../../uploads');
+const DATA_DIR = path.resolve(__dirname, '../../data');
+const RESUME_STORE_PATH = path.join(DATA_DIR, 'resumes.json');
+
+const ensureResumeStorage = (): void => {
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  }
+
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+
+  if (!fs.existsSync(RESUME_STORE_PATH)) {
+    fs.writeFileSync(RESUME_STORE_PATH, '[]', 'utf8');
+  }
+};
+
+const resumeFileExists = (resume: Resume): boolean => {
+  if (!resume.storedFileName) {
+    return false;
+  }
+
+  const safeFileName = path.basename(resume.storedFileName);
+  const storedPath = path.resolve(UPLOADS_DIR, safeFileName);
+  return storedPath.startsWith(UPLOADS_DIR) && fs.existsSync(storedPath);
+};
+
+const normalizeStoredResume = (resume: Resume): Resume => ({
+  ...resume,
+  uploadedAt: resume.uploadedAt || new Date().toISOString()
+});
+
+const readResumeStore = (): Resume[] => {
+  ensureResumeStorage();
+
+  try {
+    const raw = fs.readFileSync(RESUME_STORE_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    const storedResumes = parsed
+      .filter(item => item && typeof item === 'object')
+      .map(item => normalizeStoredResume(item as Resume))
+      .filter(resume => resumeFileExists(resume));
+
+    if (storedResumes.length !== parsed.length) {
+      fs.writeFileSync(RESUME_STORE_PATH, JSON.stringify(storedResumes, null, 2), 'utf8');
+    }
+
+    return storedResumes.sort((a, b) => {
+      const left = a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0;
+      const right = b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0;
+      return right - left;
+    });
+  } catch (error) {
+    console.error('Error reading stored resume library:', error);
+    return [];
+  }
+};
+
+const writeResumeStore = (resumes: Resume[]): void => {
+  ensureResumeStorage();
+  fs.writeFileSync(RESUME_STORE_PATH, JSON.stringify(resumes, null, 2), 'utf8');
+};
+
+export const listStoredResumes = (): Resume[] => readResumeStore();
+
+export const getStoredResumeById = (resumeId: string): Resume | null => {
+  const storedResume = readResumeStore().find(resume => resume.id === resumeId);
+  return storedResume || null;
+};
+
+const persistResume = (resume: Resume): Resume => {
+  const normalizedResume = normalizeStoredResume(resume);
+  const existingResumes = readResumeStore().filter(existingResume => existingResume.id !== normalizedResume.id);
+  writeResumeStore([normalizedResume, ...existingResumes]);
+  return normalizedResume;
+};
+
 /**
  * Extract text from a PDF file
  */
@@ -84,16 +166,19 @@ export const parseResume = async (file: any): Promise<Resume> => {
     const experience = extractExperience(content);
     const education = extractEducation(content);
     
-    return {
+    const resume = {
       id: uuidv4(),
       fileName: file.originalname,
       fileType: fileType,
       content: content,
+      uploadedAt: new Date().toISOString(),
       storedFileName: file.filename,
       skills,
       experience,
       education
     };
+
+    return persistResume(resume);
   } catch (error: unknown) {
     console.error('Error parsing resume:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

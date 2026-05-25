@@ -1,12 +1,24 @@
 import React, { useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { Resume } from '../models/Resume';
 
 interface ResumeUploaderProps {
   onUpload: (file: File) => Promise<void>;
+  onSelectStoredResume: (resumeId: string) => Promise<void>;
+  storedResumes: Resume[];
+  selectedResumeId?: string;
   isLoading: boolean;
+  isStoredResumesLoading: boolean;
 }
 
-const ResumeUploader: React.FC<ResumeUploaderProps> = ({ onUpload, isLoading }) => {
+const ResumeUploader: React.FC<ResumeUploaderProps> = ({
+  onUpload,
+  onSelectStoredResume,
+  storedResumes,
+  selectedResumeId,
+  isLoading,
+  isStoredResumesLoading
+}) => {
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
       if (acceptedFiles.length > 0) {
@@ -80,6 +92,40 @@ const ResumeUploader: React.FC<ResumeUploaderProps> = ({ onUpload, isLoading }) 
               </p>
             )}
           </>
+        )}
+      </div>
+
+      <div className="stored-resumes-panel">
+        <div className="stored-resumes-header">
+          <h3>Stored Resumes</h3>
+          {isStoredResumesLoading && <span className="stored-resumes-status">Loading...</span>}
+        </div>
+
+        {storedResumes.length > 0 ? (
+          <div className="stored-resume-list">
+            {storedResumes.map((resume) => {
+              const isSelected = selectedResumeId === resume.id;
+
+              return (
+                <button
+                  key={resume.id}
+                  type="button"
+                  className={`stored-resume-card ${isSelected ? 'selected' : ''}`}
+                  disabled={isLoading}
+                  onClick={() => void onSelectStoredResume(resume.id)}
+                >
+                  <span className="stored-resume-name">{resume.fileName}</span>
+                  <span className="stored-resume-meta">
+                    {resume.fileType.toUpperCase()}
+                    {resume.uploadedAt ? ` • ${new Date(resume.uploadedAt).toLocaleDateString()}` : ''}
+                  </span>
+                  {isSelected && <span className="stored-resume-selected">Selected</span>}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="stored-resumes-empty">No stored resumes yet. Upload one to keep it for later.</p>
         )}
       </div>
     </div>

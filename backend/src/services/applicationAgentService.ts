@@ -4,6 +4,7 @@ import OpenAI from 'openai';
 import { BrowserContext, chromium, Page } from 'playwright';
 import { Job } from '../models/Job';
 import { Resume } from '../models/Resume';
+import { listStoredResumes } from './resumeParserService';
 
 const MAX_AGENT_STEPS = Number(process.env.APPLY_AGENT_MAX_STEPS || 25);
 const MAX_STEP_RECOVERY_ATTEMPTS = Number(process.env.APPLY_AGENT_MAX_STEP_RECOVERY_ATTEMPTS || 3);
@@ -30,6 +31,7 @@ const FORCE_CONTINUE_INSTRUCTION =
   'Do not stop for routine employer questions, imperfect prefilled answers, or missing exact years. Continue by using conservative resume-grounded estimates, correcting existing selections and text, replacing weak prefilled cover-letter content, and uploading or replacing the resume if the page expects it.';
 const HUMAN_TYPING_DELAY_MS = 35;
 const SEQUENTIAL_TYPE_MAX_CHARS = 220;
+const REDACTED_PASSWORD_VALUE = '__redacted_password_present__';
 
 let openaiClient: OpenAI | null = null;
 let seekLoginSession: { context: BrowserContext; page: Page } | null = null;
@@ -43,6 +45,17 @@ interface CandidateProfile {
   linkedin?: string;
   github?: string;
   website?: string;
+  skills: string[];
+  experienceHighlights: string[];
+  educationHighlights: string[];
+  estimatedCareerYears?: number;
+  resumeSummary: string;
+}
+
+interface ResumeLibraryEntry {
+  id: string;
+  fileName: string;
+  uploadedAt?: string;
   skills: string[];
   experienceHighlights: string[];
   educationHighlights: string[];
@@ -72,6 +85,7 @@ interface PageElementSnapshot {
   maxLength?: number | null;
   options?: string[];
   selectedOption?: string | null;
+  focused?: boolean;
   editable?: boolean;
   clickable?: boolean;
   selectable?: boolean;
@@ -85,6 +99,7 @@ interface PageSnapshot {
   visibleText: string;
   validationMessages: string[];
   activeElementId?: number;
+  activeElementSummary?: string;
   canGoBack: boolean;
   elements: PageElementSnapshot[];
 }
@@ -137,6 +152,12 @@ interface ExecutedAction {
 interface ActionVerificationResult {
   success: boolean;
   message: string;
+}
+
+interface DecisionExecutionResult {
+  executedAction: ExecutedAction;
+  page: Page;
+  pageChangeMessage?: string;
 }
 
 interface BrowserSession {
@@ -358,6 +379,39 @@ const extractCandidateProfile = (resume: Resume): CandidateProfile => {
   };
 };
 
+const buildResumeLibraryContext = (primaryResume: Resume): ResumeLibraryEntry[] => {
+  return listStoredResumes()
+    .filter(storedResume => {
+      if (storedResume.id === primaryResume.id) {
+        return false;
+      }
+
+      if (
+        primaryResume.storedFileName &&
+        storedResume.storedFileName &&
+        storedResume.storedFileName === primaryResume.storedFileName
+      ) {
+        return false;
+      }
+
+      return true;
+    })
+    .slice(0, 6)
+    .map(storedResume => {
+      const profile = extractCandidateProfile(storedResume);
+      return {
+        id: storedResume.id,
+        fileName: storedResume.fileName,
+        uploadedAt: storedResume.uploadedAt,
+        skills: profile.skills.slice(0, 10),
+        experienceHighlights: profile.experienceHighlights.slice(0, 6),
+        educationHighlights: profile.educationHighlights.slice(0, 4),
+        estimatedCareerYears: profile.estimatedCareerYears,
+        resumeSummary: compactText(profile.resumeSummary, 1600)
+      };
+    });
+};
+
 const resolveResumeFilePath = (resume: Resume): string => {
   if (!resume.storedFileName) {
     throw new Error('Resume file is not available for auto-apply. Upload the resume again while the backend is running.');
@@ -495,6 +549,8 @@ const capturePageSnapshot = async (page: Page): Promise<PageSnapshot> => {
       .querySelectorAll('[data-llm-target-id]')
       .forEach(element => element.removeAttribute('data-llm-target-id'));
 
+    const activeElement = document.activeElement as HTMLElement | null;
+
     const candidates = Array.from(
       document.querySelectorAll(
         'input, textarea, select, button, a[href], [role="button"], [role="textbox"], [contenteditable="true"]'
@@ -543,7 +599,14 @@ const capturePageSnapshot = async (page: Page): Promise<PageSnapshot> => {
         label: getLabel(element),
         name: element.getAttribute('name'),
         placeholder: element.getAttribute('placeholder'),
-        value: 'value' in input ? clean(input.value, 200) : null,
+        value:
+          'value' in input
+            ? (input.type || '').toLowerCase() === 'password'
+              ? input.value
+                ? '__redacted_password_present__'
+                : ''
+              : clean(input.value, 200)
+            : null,
         checked: 'checked' in input ? Boolean(input.checked) : undefined,
         required: 'required' in input ? Boolean(input.required) : undefined,
         disabled: 'disabled' in input ? Boolean(input.disabled) : undefined,
@@ -571,6 +634,7 @@ const capturePageSnapshot = async (page: Page): Promise<PageSnapshot> => {
                 120
               )
             : null,
+        focused: activeElement === element,
         editable:
           element instanceof HTMLInputElement ||
           element instanceof HTMLTextAreaElement ||
@@ -598,10 +662,19 @@ const capturePageSnapshot = async (page: Page): Promise<PageSnapshot> => {
       .filter(Boolean)
       .slice(0, 12);
 
-    const activeElement = document.activeElement as HTMLElement | null;
-    const activeElementId = activeElement
-      ? Number(activeElement.getAttribute('data-llm-target-id') || '') || undefined
-      : undefined;
+    const activeSnapshotElement = elements.find(element => element.focused);
+    const activeElementId = activeSnapshotElement?.id;
+    const activeElementSummary = activeSnapshotElement
+      ? clean(
+          `${activeSnapshotElement.label || activeSnapshotElement.name || activeSnapshotElement.placeholder || activeSnapshotElement.tag} (${activeSnapshotElement.type || activeSnapshotElement.tag})`,
+          160
+        )
+      : clean(
+          activeElement
+            ? `${activeElement.getAttribute('aria-label') || activeElement.getAttribute('name') || activeElement.tagName.toLowerCase()}`
+            : '',
+          160
+        ) || undefined;
 
     return {
       title: document.title,
@@ -609,6 +682,7 @@ const capturePageSnapshot = async (page: Page): Promise<PageSnapshot> => {
       visibleText: clean(document.body?.innerText || '', maxVisibleTextChars),
       validationMessages,
       activeElementId,
+      activeElementSummary,
       canGoBack: window.history.length > 1,
       elements
     };
@@ -701,6 +775,19 @@ const getSnapshotElement = (
   }
 
   return snapshot.elements.find(element => element.id === targetId);
+};
+
+const getActiveEditableElement = (snapshot: PageSnapshot): PageElementSnapshot | undefined => {
+  if (!snapshot.activeElementId) {
+    return undefined;
+  }
+
+  const activeElement = getSnapshotElement(snapshot, snapshot.activeElementId);
+  if (!activeElement?.editable || activeElement.disabled || activeElement.hidden) {
+    return undefined;
+  }
+
+  return activeElement;
 };
 
 const getElementHints = (element: PageElementSnapshot | undefined): string => {
@@ -838,6 +925,11 @@ const resolveFallbackTypeTargetId = (
   decision: AgentDecision,
   snapshot: PageSnapshot
 ): number | undefined => {
+  const activeEditableElement = getActiveEditableElement(snapshot);
+  if (!decision.targetId && activeEditableElement) {
+    return activeEditableElement.id;
+  }
+
   const fieldKind = inferFieldKind(decision, snapshot);
   const editableElements = snapshot.elements.filter(
     element => element.editable && !element.disabled && !element.hidden
@@ -897,7 +989,7 @@ const resolveAutofillText = (
   }
 
   const fieldKind = inferFieldKind(decision, snapshot);
-  const element = getSnapshotElement(snapshot, decision.targetId);
+  const element = getSnapshotElement(snapshot, decision.targetId) || getActiveEditableElement(snapshot);
   if (!element) {
     return getCandidateValueForFieldKind(fieldKind, candidateProfile, job);
   }
@@ -1052,6 +1144,7 @@ const planNextAction = async (
   job: Job,
   resume: Resume,
   candidateProfile: CandidateProfile,
+  resumeLibrary: ResumeLibraryEntry[],
   snapshot: PageSnapshot,
   logs: string[],
   extraInstruction?: string,
@@ -1072,17 +1165,21 @@ const planNextAction = async (
             'Respond only with JSON. Be truthful and use only candidate information present in the provided profile or resume summary. ' +
             'Do not invent qualifications, salary expectations, or sponsorship answers. ' +
             'If a required employer question asks for years of experience or skill exposure, infer a conservative estimate from the resume evidence and choose the lowest supported answer rather than stopping. ' +
+            'Use the selected resume as the primary source of truth. You may use the provided resumeLibrary only for additional factual context from the user’s other stored resumes, and you must not merge contradictory claims. ' +
             'Prefer concise professional answers. ' +
             'You have a Playwright-backed browser toolset, not raw code execution. ' +
             'Use these actions only: click, double_click, hover, focus, clear, type, select, check, upload_resume, press, scroll, scroll_into_view, wait, wait_for_text, go_back, reload, done, fail. ' +
+            'External employer pages, redirects, and new tabs are supported. Do not fail merely because the application leaves Seek or loads on another domain. Continue the application on the new page just like any other page. ' +
             'Only use type on elements where editable=true, select on selectable=true, check on checkable=true, upload_resume on uploadable=true, and click/double_click/hover/focus/scroll_into_view on elements that are relevant visible targets. ' +
-            'Every click, double_click, hover, focus, clear, type, select, check, upload_resume, and scroll_into_view action must include a valid numeric targetId from the current page snapshot. ' +
+            'Every click, double_click, hover, focus, clear, select, check, upload_resume, and scroll_into_view action must include a valid numeric targetId from the current page snapshot. ' +
+            'Type actions normally include targetId, but if a field is hard to target directly, security-sensitive, or only reachable by keyboard navigation, you may use press with Tab or Shift+Tab until the desired field is focused and then use type without targetId to type into the currently focused field. ' +
             'For every type action, you must include the exact literal string to enter in the "text" field. Never omit it. ' +
             'Return exactly one JSON object and nothing else. Do not include markdown, code fences, commentary, or multiple JSON objects. ' +
             'Use clear before type when a text field already contains inaccurate, generic, or irrelevant content. ' +
             'Use hover or focus when menus, tooltips, or lazy controls need activation before clicking or typing. ' +
             'Use scroll_into_view when the needed target is off-screen or blocked by sticky layout. ' +
             'Use wait_for_text when you expect visible page text, validation copy, or a new question section to appear. ' +
+            'Use page.activeElementSummary and focused elements to reason about keyboard navigation. If the focused element is the desired password or login field, you may type into it directly after tabbing. ' +
             'Treat recent verification logs as authoritative. If a recent log says a field now matches the entered text or selected option, do not rewrite that field again unless new validation messages or the latest snapshot show it is empty, invalid, or changed. ' +
             'If attemptFeedback is provided, correct that exact failure and choose a different valid action when repeating the same action would be ineffective. ' +
             'Use page.validationMessages, element.invalid, element.value, and element.selectedOption to correct blocked or prefilled fields before giving up. ' +
@@ -1104,6 +1201,7 @@ const planNextAction = async (
                 url: job.url
               },
               candidateProfile,
+              resumeLibrary,
               resumeSummary: compactText(resume.content, MAX_RESUME_CHARS),
               page: snapshot,
               recentLogs: logs.slice(-8),
@@ -1113,7 +1211,7 @@ const planNextAction = async (
                 reasoning: 'string',
                 action:
                   'click | double_click | hover | focus | clear | type | select | check | upload_resume | press | scroll | scroll_into_view | wait | wait_for_text | go_back | reload | done | fail',
-                targetId: 'number when targeting an element',
+                targetId: 'number when targeting an element; optional for type when typing into the currently focused field after keyboard navigation',
                 text: 'string for type actions',
                 option: 'string for select actions',
                 checked: 'boolean for check actions',
@@ -1189,6 +1287,19 @@ const clearEditableTarget = async (page: Page, targetId: number, snapshot: PageS
   await page.waitForTimeout(150);
 };
 
+const typeIntoFocusedElement = async (page: Page, text: string): Promise<void> => {
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+  await page.keyboard.press('Backspace');
+
+  if (text.length <= SEQUENTIAL_TYPE_MAX_CHARS) {
+    await page.keyboard.type(text, { delay: HUMAN_TYPING_DELAY_MS });
+  } else {
+    await page.keyboard.insertText(text);
+  }
+
+  await page.waitForTimeout(200);
+};
+
 const typeIntoTarget = async (
   page: Page,
   targetId: number,
@@ -1237,6 +1348,63 @@ const waitForVisibleText = async (page: Page, textQuery: string, timeoutMs = 100
     .waitFor({ state: 'visible', timeout: Math.max(500, Math.min(20000, timeoutMs)) });
 };
 
+const getPageOrigin = (url: string): string => {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return '';
+  }
+};
+
+const completeInteractivePageAction = async (
+  currentPage: Page,
+  action: () => Promise<void>
+): Promise<{ page: Page; pageChangeMessage?: string }> => {
+  const beforePages = new Set(currentPage.context().pages().filter(page => !page.isClosed()));
+  const popupPromise = currentPage.waitForEvent('popup', { timeout: 4000 }).catch(() => null);
+
+  await action();
+
+  const popupPage = await Promise.race([
+    popupPromise,
+    currentPage.waitForTimeout(1200).then(() => null)
+  ]);
+  let nextPage = popupPage;
+
+  if (!nextPage) {
+    await currentPage.waitForTimeout(400);
+    nextPage =
+      currentPage
+        .context()
+        .pages()
+        .find(page => !page.isClosed() && !beforePages.has(page)) || null;
+  }
+
+  if (nextPage) {
+    try {
+      await nextPage.waitForLoadState('domcontentloaded', { timeout: 15000 });
+    } catch {
+      // Best effort only. Some external sites keep loading while still being usable.
+    }
+    await settlePage(nextPage);
+    try {
+      await nextPage.bringToFront();
+    } catch {
+      // Ignore focus failures.
+    }
+
+    const message =
+      getPageOrigin(nextPage.url()) !== getPageOrigin(currentPage.url())
+        ? `Switched to external page: ${nextPage.url()}`
+        : `Switched to new page: ${nextPage.url()}`;
+
+    return { page: nextPage, pageChangeMessage: message };
+  }
+
+  await settlePage(currentPage);
+  return { page: currentPage };
+};
+
 const captureRunScreenshot = async (
   page: Page,
   runArtifactsDir: string,
@@ -1271,8 +1439,16 @@ const verifyActionOutcome = (
   beforeSnapshot: PageSnapshot,
   afterSnapshot: PageSnapshot
 ): ActionVerificationResult => {
-  const beforeElement = getSnapshotElement(beforeSnapshot, executedAction.targetId);
-  const afterElement = getSnapshotElement(afterSnapshot, executedAction.targetId);
+  const beforeElement =
+    getSnapshotElement(beforeSnapshot, executedAction.targetId) ||
+    (executedAction.action === 'type' || executedAction.action === 'clear'
+      ? getActiveEditableElement(beforeSnapshot)
+      : undefined);
+  const afterElement =
+    getSnapshotElement(afterSnapshot, executedAction.targetId) ||
+    (executedAction.action === 'type' || executedAction.action === 'clear'
+      ? getActiveEditableElement(afterSnapshot)
+      : undefined);
 
   switch (executedAction.action) {
     case 'clear': {
@@ -1282,6 +1458,12 @@ const verifyActionOutcome = (
         : { success: false, message: `Target ${executedAction.targetId} still contains text after clear.` };
     }
     case 'type': {
+      if (afterElement?.type === 'password') {
+        return afterElement.value
+          ? { success: true, message: 'Verified the focused password field now contains a value.' }
+          : { success: false, message: 'The focused password field still appears empty.' };
+      }
+
       const afterValue = getElementComparableValue(afterElement);
       const expectedPrefix = buildExpectedComparablePrefix(executedAction.text || '');
       const success =
@@ -1324,7 +1506,6 @@ const verifyActionOutcome = (
     }
     case 'click':
     case 'double_click':
-    case 'press':
     case 'go_back':
     case 'reload': {
       const changed =
@@ -1334,6 +1515,17 @@ const verifyActionOutcome = (
       return changed
         ? { success: true, message: `Verified page state changed after ${executedAction.action}.` }
         : { success: true, message: `No major visible change detected after ${executedAction.action}, but the action completed.` };
+    }
+    case 'press': {
+      const focusSummary = afterSnapshot.activeElementSummary
+        ? ` Focus is now on ${afterSnapshot.activeElementSummary}.`
+        : '';
+      const changed =
+        beforeSnapshot.activeElementId !== afterSnapshot.activeElementId ||
+        beforeSnapshot.url !== afterSnapshot.url;
+      return changed
+        ? { success: true, message: `Verified keyboard navigation changed focus or page state.${focusSummary}` }
+        : { success: true, message: `Keyboard input completed.${focusSummary}` };
     }
     case 'hover':
     case 'focus':
@@ -1354,23 +1546,33 @@ const executeDecision = async (
   snapshot: PageSnapshot,
   candidateProfile: CandidateProfile,
   job: Job
-): Promise<ExecutedAction> => {
+): Promise<DecisionExecutionResult> => {
   switch (decision.action) {
     case 'click': {
       if (!decision.targetId) {
         throw new Error('LLM click action did not include a targetId.');
       }
-      await (await prepareTargetLocator(page, decision.targetId)).click({ timeout: 10000 });
-      await settlePage(page);
-      return { action: 'click', targetId: decision.targetId };
+      const resolved = await completeInteractivePageAction(page, async () => {
+        await (await prepareTargetLocator(page, decision.targetId!)).click({ timeout: 10000 });
+      });
+      return {
+        executedAction: { action: 'click', targetId: decision.targetId },
+        page: resolved.page,
+        pageChangeMessage: resolved.pageChangeMessage
+      };
     }
     case 'double_click': {
       if (!decision.targetId) {
         throw new Error('LLM double_click action did not include a targetId.');
       }
-      await (await prepareTargetLocator(page, decision.targetId)).dblclick({ timeout: 10000 });
-      await settlePage(page);
-      return { action: 'double_click', targetId: decision.targetId };
+      const resolved = await completeInteractivePageAction(page, async () => {
+        await (await prepareTargetLocator(page, decision.targetId!)).dblclick({ timeout: 10000 });
+      });
+      return {
+        executedAction: { action: 'double_click', targetId: decision.targetId },
+        page: resolved.page,
+        pageChangeMessage: resolved.pageChangeMessage
+      };
     }
     case 'hover': {
       if (!decision.targetId) {
@@ -1378,7 +1580,7 @@ const executeDecision = async (
       }
       await (await prepareTargetLocator(page, decision.targetId)).hover({ timeout: 10000 });
       await page.waitForTimeout(300);
-      return { action: 'hover', targetId: decision.targetId };
+      return { executedAction: { action: 'hover', targetId: decision.targetId }, page };
     }
     case 'focus': {
       if (!decision.targetId) {
@@ -1386,27 +1588,48 @@ const executeDecision = async (
       }
       await (await prepareTargetLocator(page, decision.targetId)).focus({ timeout: 10000 });
       await page.waitForTimeout(200);
-      return { action: 'focus', targetId: decision.targetId };
+      return { executedAction: { action: 'focus', targetId: decision.targetId }, page };
     }
     case 'clear': {
       if (!decision.targetId) {
         throw new Error('LLM clear action did not include a targetId.');
       }
       await clearEditableTarget(page, decision.targetId, snapshot);
-      return { action: 'clear', targetId: decision.targetId };
+      return { executedAction: { action: 'clear', targetId: decision.targetId }, page };
     }
     case 'type': {
       const text = resolveAutofillText(decision, snapshot, candidateProfile, job);
       const resolvedTargetId = resolveFallbackTypeTargetId(decision, snapshot);
-      if (!resolvedTargetId || text === undefined) {
-        const element = getSnapshotElement(snapshot, resolvedTargetId || decision.targetId);
+      if (text === undefined) {
+        const element =
+          getSnapshotElement(snapshot, resolvedTargetId || decision.targetId) ||
+          getActiveEditableElement(snapshot);
         const hint = element
           ? `target "${element.label || element.name || element.placeholder || element.text || element.tag}"`
           : 'unknown target';
         throw new Error(`LLM type action did not include text and no autofill value was available for ${hint}.`);
       }
+      if (!decision.targetId) {
+        if (!snapshot.activeElementId && !snapshot.activeElementSummary) {
+          throw new Error(
+            'LLM attempted to type into the focused field, but there is no detectable focused element. Use Tab or focus first.'
+          );
+        }
+        await typeIntoFocusedElement(page, text);
+        return {
+          executedAction: {
+            action: 'type',
+            targetId: resolvedTargetId || snapshot.activeElementId,
+            text
+          },
+          page
+        };
+      }
+      if (!resolvedTargetId) {
+        throw new Error('LLM type action could not resolve an editable target.');
+      }
       await typeIntoTarget(page, resolvedTargetId, text, snapshot);
-      return { action: 'type', targetId: resolvedTargetId, text };
+      return { executedAction: { action: 'type', targetId: resolvedTargetId, text }, page };
     }
     case 'select': {
       if (!decision.targetId || !decision.option) {
@@ -1424,7 +1647,10 @@ const executeDecision = async (
         }
       }
       await settlePage(page);
-      return { action: 'select', targetId: decision.targetId, option: resolvedOption };
+      return {
+        executedAction: { action: 'select', targetId: decision.targetId, option: resolvedOption },
+        page
+      };
     }
     case 'check': {
       if (!decision.targetId || decision.checked === undefined) {
@@ -1437,7 +1663,10 @@ const executeDecision = async (
         await locator.uncheck({ timeout: 10000 });
       }
       await page.waitForTimeout(250);
-      return { action: 'check', targetId: decision.targetId, checked: decision.checked };
+      return {
+        executedAction: { action: 'check', targetId: decision.targetId, checked: decision.checked },
+        page
+      };
     }
     case 'upload_resume': {
       if (!decision.targetId) {
@@ -1447,21 +1676,27 @@ const executeDecision = async (
         timeout: 10000
       });
       await settlePage(page);
-      return { action: 'upload_resume', targetId: decision.targetId };
+      return { executedAction: { action: 'upload_resume', targetId: decision.targetId }, page };
     }
     case 'press': {
-      if (decision.targetId) {
-        await (await prepareTargetLocator(page, decision.targetId)).focus();
-        await page.waitForTimeout(100);
-      }
-      await page.keyboard.press(decision.key || 'Tab');
-      await page.waitForTimeout(250);
-      return { action: 'press', targetId: decision.targetId, key: decision.key || 'Tab' };
+      const resolved = await completeInteractivePageAction(page, async () => {
+        if (decision.targetId) {
+          await (await prepareTargetLocator(page, decision.targetId)).focus();
+          await page.waitForTimeout(100);
+        }
+        await page.keyboard.press(decision.key || 'Tab');
+        await page.waitForTimeout(250);
+      });
+      return {
+        executedAction: { action: 'press', targetId: decision.targetId, key: decision.key || 'Tab' },
+        page: resolved.page,
+        pageChangeMessage: resolved.pageChangeMessage
+      };
     }
     case 'scroll': {
       await page.mouse.wheel(0, decision.amount || 750);
       await page.waitForTimeout(250);
-      return { action: 'scroll', amount: decision.amount || 750 };
+      return { executedAction: { action: 'scroll', amount: decision.amount || 750 }, page };
     }
     case 'scroll_into_view': {
       if (!decision.targetId) {
@@ -1471,12 +1706,12 @@ const executeDecision = async (
         timeout: 10000
       });
       await page.waitForTimeout(200);
-      return { action: 'scroll_into_view', targetId: decision.targetId };
+      return { executedAction: { action: 'scroll_into_view', targetId: decision.targetId }, page };
     }
     case 'wait': {
       const waitMs = Math.max(250, Math.min(10000, decision.amount || 1500));
       await page.waitForTimeout(waitMs);
-      return { action: 'wait', amount: waitMs };
+      return { executedAction: { action: 'wait', amount: waitMs }, page };
     }
     case 'wait_for_text': {
       const textQuery = decision.textQuery || decision.text || '';
@@ -1486,26 +1721,30 @@ const executeDecision = async (
         decision.amount || 10000
       );
       await page.waitForTimeout(150);
-      return { action: 'wait_for_text', textQuery, amount: decision.amount || 10000 };
+      return {
+        executedAction: { action: 'wait_for_text', textQuery, amount: decision.amount || 10000 },
+        page
+      };
     }
     case 'go_back': {
       await page.goBack({ waitUntil: 'domcontentloaded', timeout: 30000 });
       await settlePage(page);
-      return { action: 'go_back' };
+      return { executedAction: { action: 'go_back' }, page };
     }
     case 'reload': {
       await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
       await settlePage(page);
-      return { action: 'reload' };
+      return { executedAction: { action: 'reload' }, page };
     }
     case 'done':
     case 'fail':
-      return { action: decision.action };
+      return { executedAction: { action: decision.action }, page };
   }
 };
 
 export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicationResult> => {
   const candidateProfile = extractCandidateProfile(resume);
+  const resumeLibrary = buildResumeLibraryContext(resume);
   const resumeFilePath = resolveResumeFilePath(resume);
   const runArtifactsDir = createRunArtifactsDir(job);
   await closeSeekLoginSessionIfOpen();
@@ -1515,14 +1754,14 @@ export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicati
   let lastSnapshot: PageSnapshot | null = null;
 
   try {
-    const { page } = session;
+    let currentPage = session.page;
     logs.push(`Opening job page: ${job.url}`);
-    await page.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await settlePage(page);
-    artifacts.push(await captureRunScreenshot(page, runArtifactsDir, 0, 'initial-page'));
+    await currentPage.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await settlePage(currentPage);
+    artifacts.push(await captureRunScreenshot(currentPage, runArtifactsDir, 0, 'initial-page'));
 
     for (let step = 1; step <= MAX_AGENT_STEPS; step += 1) {
-      lastSnapshot = await capturePageSnapshot(page);
+      lastSnapshot = await capturePageSnapshot(currentPage);
 
       const completionMessage = detectCompletion(lastSnapshot);
       if (completionMessage) {
@@ -1550,6 +1789,7 @@ export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicati
             job,
             resume,
             candidateProfile,
+            resumeLibrary,
             workingSnapshot,
             logs,
             stepExtraInstruction,
@@ -1565,6 +1805,7 @@ export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicati
               job,
               resume,
               candidateProfile,
+              resumeLibrary,
               workingSnapshot,
               logs,
               stepExtraInstruction,
@@ -1578,7 +1819,7 @@ export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicati
 
           if (decision.action === 'done') {
             artifacts.push(
-              await captureRunScreenshot(page, runArtifactsDir, step, `step-${step}-attempt-${attempt}-done`)
+              await captureRunScreenshot(currentPage, runArtifactsDir, step, `step-${step}-attempt-${attempt}-done`)
             );
             return {
               status: decision.finalStatus || 'review_required',
@@ -1592,7 +1833,7 @@ export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicati
 
           if (decision.action === 'fail') {
             artifacts.push(
-              await captureRunScreenshot(page, runArtifactsDir, step, `step-${step}-attempt-${attempt}-fail`)
+              await captureRunScreenshot(currentPage, runArtifactsDir, step, `step-${step}-attempt-${attempt}-fail`)
             );
             return {
               status: 'failed',
@@ -1604,20 +1845,29 @@ export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicati
             };
           }
 
-          const executedAction = await executeDecision(
-            page,
+          const execution = await executeDecision(
+            currentPage,
             decision,
             resumeFilePath,
             workingSnapshot,
             candidateProfile,
             job
           );
-          const postActionSnapshot = await capturePageSnapshot(page);
-          const verification = verifyActionOutcome(executedAction, workingSnapshot, postActionSnapshot);
+          currentPage = execution.page;
+          session.page = currentPage;
+          if (execution.pageChangeMessage) {
+            logs.push(`${attemptLabel} navigation - ${execution.pageChangeMessage}`);
+          }
+          const postActionSnapshot = await capturePageSnapshot(currentPage);
+          const verification = verifyActionOutcome(
+            execution.executedAction,
+            workingSnapshot,
+            postActionSnapshot
+          );
           logs.push(`${attemptLabel} check - ${verification.message}`);
           artifacts.push(
             await captureRunScreenshot(
-              page,
+              currentPage,
               runArtifactsDir,
               step,
               `step-${step}-attempt-${attempt}-${decision.action}`
@@ -1638,7 +1888,7 @@ export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicati
           }
 
           attemptFeedback = compactText(
-            `The previous attempt used action "${executedAction.action}" and did not succeed. ${verification.message} Do not repeat the same ineffective action unless the latest snapshot clearly shows it is necessary.`,
+            `The previous attempt used action "${execution.executedAction.action}" and did not succeed. ${verification.message} Do not repeat the same ineffective action unless the latest snapshot clearly shows it is necessary.`,
             500
           );
           logs.push(
@@ -1649,7 +1899,7 @@ export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicati
           try {
             artifacts.push(
               await captureRunScreenshot(
-                page,
+                currentPage,
                 runArtifactsDir,
                 step,
                 `step-${step}-attempt-${attempt}-error`
@@ -1662,7 +1912,7 @@ export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicati
           logs.push(`${attemptLabel} failed - ${message}`);
 
           try {
-            workingSnapshot = await capturePageSnapshot(page);
+            workingSnapshot = await capturePageSnapshot(currentPage);
             lastSnapshot = workingSnapshot;
           } catch {
             // Keep the previous snapshot if the current page cannot be captured.

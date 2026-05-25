@@ -1,29 +1,34 @@
 import { useState, useEffect } from 'react';
 import { Resume } from '../models/Resume';
 import { Job } from '../models/Job';
-import { parseResume } from '../services/resumeParserService';
+import { getStoredResume, listStoredResumes, parseResume } from '../services/resumeParserService';
 import { generateSearchTerms, evaluateJobMatch, evaluateJobMatchesBulk } from '../services/openAiService';
 import { scrapeJobs } from '../services/scrapeService';
 import { applyToJob as autoApplyToJob, openSeekLoginBrowser } from '../services/applicationService';
 
 interface JobSearchState {
   resume: Resume | null;
+  storedResumes: Resume[];
   searchTerms: string[];
   jobs: Job[];
   isLoading: boolean;
+  isBulkAutoApplying: boolean;
   error: string | null;
   location: string;
   jobSearchAmount: number;
   seekLoginMessage: string | null;
   isSeekLoginLoading: boolean;
+  isStoredResumesLoading: boolean;
 }
 
 interface JobSearchActions {
   uploadResume: (file: File) => Promise<void>;
+  selectStoredResume: (resumeId: string) => Promise<void>;
   searchJobs: (customTerms?: string[]) => Promise<void>;
   searchJobsNoAI: (customTerms?: string[]) => Promise<void>;
   evaluateMatch: (jobId: string) => Promise<void>;
   applyToJob: (jobId: string) => Promise<void>;
+  autoApplyMatchingJobs: () => Promise<void>;
   loginToSeek: () => Promise<void>;
   setLocation: (location: string) => void;
   setJobSearchAmount: (amount: number) => void;
@@ -35,32 +40,96 @@ const getPageLimitForMaxJobs = (maxJobs: number): number => {
 
 const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   const [resume, setResume] = useState<Resume | null>(null);
+  const [storedResumes, setStoredResumes] = useState<Resume[]>([]);
   const [searchTerms, setSearchTerms] = useState<string[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isBulkAutoApplying, setIsBulkAutoApplying] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [location, setLocation] = useState<string>('Australia');
   const [jobSearchAmount, setJobSearchAmount] = useState<number>(25);
   const [seekLoginMessage, setSeekLoginMessage] = useState<string | null>(null);
   const [isSeekLoginLoading, setIsSeekLoginLoading] = useState<boolean>(false);
+  const [isStoredResumesLoading, setIsStoredResumesLoading] = useState<boolean>(false);
+
+  const upsertStoredResume = (nextResume: Resume): void => {
+    setStoredResumes(currentResumes => {
+      const deduped = currentResumes.filter(currentResume => currentResume.id !== nextResume.id);
+      return [nextResume, ...deduped].sort((left, right) => {
+        const leftTime = left.uploadedAt ? new Date(left.uploadedAt).getTime() : 0;
+        const rightTime = right.uploadedAt ? new Date(right.uploadedAt).getTime() : 0;
+        return rightTime - leftTime;
+      });
+    });
+  };
+
+  const activateResume = async (nextResume: Resume): Promise<void> => {
+    setResume(nextResume);
+    setJobs([]);
+    setError(null);
+
+    if (nextResume.generatedSearchTerms && nextResume.generatedSearchTerms.length > 0) {
+      setSearchTerms(nextResume.generatedSearchTerms);
+      upsertStoredResume(nextResume);
+      return;
+    }
+
+    try {
+      const terms = await generateSearchTerms(nextResume);
+      const hydratedResume = { ...nextResume, generatedSearchTerms: terms };
+      setResume(hydratedResume);
+      setSearchTerms(terms);
+      upsertStoredResume(hydratedResume);
+    } catch (error) {
+      setSearchTerms([]);
+      setError('Resume loaded, but failed to generate search terms');
+      console.error('Search term generation error:', error);
+    }
+  };
+
+  useEffect(() => {
+    const loadStoredResumes = async (): Promise<void> => {
+      setIsStoredResumesLoading(true);
+      try {
+        const resumes = await listStoredResumes();
+        setStoredResumes(resumes);
+      } catch (error) {
+        console.error('Stored resume loading error:', error);
+      } finally {
+        setIsStoredResumesLoading(false);
+      }
+    };
+
+    void loadStoredResumes();
+  }, []);
 
   const uploadResume = async (file: File): Promise<void> => {
     setIsLoading(true);
     setError(null);
     try {
       const parsedResume = await parseResume(file);
-      setResume(parsedResume);
-      
-      // Automatically generate search terms from the resume
-      const terms = await generateSearchTerms(parsedResume);
-      setSearchTerms(terms);
-      parsedResume.generatedSearchTerms = terms;
-      
+      upsertStoredResume(parsedResume);
+      await activateResume(parsedResume);
       setIsLoading(false);
     } catch (error) {
       setError('Failed to upload or parse resume');
       setIsLoading(false);
       console.error('Resume upload error:', error);
+    }
+  };
+
+  const selectStoredResume = async (resumeId: string): Promise<void> => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const storedResume = await getStoredResume(resumeId);
+      await activateResume(storedResume);
+      setIsLoading(false);
+    } catch (error) {
+      setError('Failed to load stored resume');
+      setIsLoading(false);
+      console.error('Stored resume selection error:', error);
     }
   };
 
@@ -169,21 +238,11 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     }
   };
 
-  const applyToJob = async (jobId: string): Promise<void> => {
-    if (!resume) {
-      setError('Please upload a resume first');
-      return;
-    }
-
-    const job = jobs.find(j => j.id === jobId);
-    if (!job) {
-      return;
-    }
-
+  const applyToJobInternal = async (job: Job, activeResume: Resume): Promise<void> => {
     setError(null);
     setJobs(currentJobs =>
       currentJobs.map(currentJob =>
-        currentJob.id === jobId
+        currentJob.id === job.id
           ? {
               ...currentJob,
               applicationStatus: 'applying',
@@ -196,11 +255,11 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     );
 
     try {
-      const result = await autoApplyToJob(job, resume);
+      const result = await autoApplyToJob(job, activeResume);
 
       setJobs(currentJobs =>
         currentJobs.map(currentJob =>
-          currentJob.id === jobId
+          currentJob.id === job.id
             ? {
                 ...currentJob,
                 applicationStatus: result.status,
@@ -217,7 +276,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
 
       setJobs(currentJobs =>
         currentJobs.map(currentJob =>
-          currentJob.id === jobId
+          currentJob.id === job.id
             ? {
                 ...currentJob,
                 applicationStatus: 'failed',
@@ -228,6 +287,65 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
         )
       );
       console.error('Auto-apply error:', error);
+    }
+  };
+
+  const applyToJob = async (jobId: string): Promise<void> => {
+    if (!resume) {
+      setError('Please upload a resume first');
+      return;
+    }
+
+    const job = jobs.find(j => j.id === jobId);
+    if (!job) {
+      return;
+    }
+
+    await applyToJobInternal(job, resume);
+  };
+
+  const autoApplyMatchingJobs = async (): Promise<void> => {
+    if (!resume) {
+      setError('Please upload a resume first');
+      return;
+    }
+
+    const eligibleJobs = jobs.filter(
+      job =>
+        (job.matchScore || 0) >= 60 &&
+        job.applicationStatus !== 'applied' &&
+        job.applicationStatus !== 'applying'
+    );
+
+    if (eligibleJobs.length === 0) {
+      setError('No jobs with a 60% or higher match are available for fully automatic apply');
+      return;
+    }
+
+    const eligibleJobIds = new Set(eligibleJobs.map(job => job.id));
+    setError(null);
+    setIsBulkAutoApplying(true);
+
+    setJobs(currentJobs =>
+      currentJobs.map(currentJob =>
+        eligibleJobIds.has(currentJob.id)
+          ? {
+              ...currentJob,
+              applicationMessage:
+                currentJob.applicationStatus === 'applied'
+                  ? currentJob.applicationMessage
+                  : 'Queued for fully automatic apply...'
+            }
+          : currentJob
+      )
+    );
+
+    try {
+      for (const job of eligibleJobs) {
+        await applyToJobInternal(job, resume);
+      }
+    } finally {
+      setIsBulkAutoApplying(false);
     }
   };
 
@@ -253,8 +371,32 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   };
 
   return [
-    { resume, searchTerms, jobs, isLoading, error, location, jobSearchAmount, seekLoginMessage, isSeekLoginLoading },
-    { uploadResume, searchJobs, searchJobsNoAI, evaluateMatch, applyToJob, loginToSeek, setLocation: updateLocation, setJobSearchAmount }
+    {
+      resume,
+      storedResumes,
+      searchTerms,
+      jobs,
+      isLoading,
+      isBulkAutoApplying,
+      error,
+      location,
+      jobSearchAmount,
+      seekLoginMessage,
+      isSeekLoginLoading,
+      isStoredResumesLoading
+    },
+    {
+      uploadResume,
+      selectStoredResume,
+      searchJobs,
+      searchJobsNoAI,
+      evaluateMatch,
+      applyToJob,
+      autoApplyMatchingJobs,
+      loginToSeek,
+      setLocation: updateLocation,
+      setJobSearchAmount
+    }
   ];
 };
 

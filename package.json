@@ -5,10 +5,14 @@
   "main": "index.js",
   "scripts": {
     "start": "webpack serve --mode development --open",
-    "build": "webpack --mode production",
+    "build": "npm run build:frontend",
+    "build:frontend": "webpack --mode production",
+    "build:backend": "cd backend && npm run build",
+    "build:all": "npm run build:frontend && npm run build:backend",
     "test": "echo \"Error: no test specified\" && exit 1",
     "setup-backend": "node setup-backend.js",
     "backend": "cd backend && npm run dev",
+    "predev": "npm run build:all",
     "dev": "concurrently \"npm start\" \"npm run backend\"",
     "test:openai": "cd backend && npm run test:openai"
   },

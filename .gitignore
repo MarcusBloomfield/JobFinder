@@ -36,6 +36,7 @@ logs/
 # Uploads and temporary files
 /backend/uploads/*
 !/backend/uploads/.gitkeep
+/backend/data/
 /tmp/
 
 # Misc

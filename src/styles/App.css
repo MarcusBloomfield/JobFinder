@@ -184,6 +184,81 @@ button:disabled {
   margin-top: 0.75rem;
 }
 
+.stored-resumes-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+}
+
+.stored-resumes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.stored-resumes-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.stored-resumes-status {
+  font-size: 0.85rem;
+  color: var(--gray-color);
+}
+
+.stored-resume-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.stored-resume-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.85rem;
+  border: 1px solid #dfe6e9;
+  border-radius: 6px;
+  background-color: white;
+  color: var(--dark-color);
+  text-align: left;
+}
+
+.stored-resume-card:hover:not(:disabled) {
+  background-color: #eef6fb;
+}
+
+.stored-resume-card.selected {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.12);
+}
+
+.stored-resume-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.stored-resume-meta {
+  font-size: 0.8rem;
+  color: var(--gray-color);
+}
+
+.stored-resume-selected {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--primary-color);
+}
+
+.stored-resumes-empty {
+  font-size: 0.9rem;
+  color: var(--gray-color);
+}
+
 .resume-info {
   display: flex;
   align-items: center;
@@ -207,6 +282,11 @@ button:disabled {
 .file-name {
   font-weight: bold;
   margin-bottom: 0.25rem;
+}
+
+.resume-meta {
+  font-size: 0.85rem;
+  color: var(--gray-color);
 }
 
 .upload-new-button {
@@ -310,6 +390,28 @@ textarea {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1rem;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.job-list-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.bulk-auto-apply-summary {
+  font-size: 0.9rem;
+  color: var(--gray-color);
+}
+
+.bulk-auto-apply-button {
+  background-color: var(--dark-color);
+}
+
+.bulk-auto-apply-button:hover:not(:disabled) {
+  background-color: #1f2d3a;
 }
 
 .filter-controls {

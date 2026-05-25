@@ -46,4 +46,54 @@ export const parseResume = async (req: FileRequest, res: Response) => {
       message: error instanceof Error ? error.message : 'An unknown error occurred'
     });
   }
-}; 
+};
+
+export const listStoredResumes = async (_req: Request, res: Response) => {
+  try {
+    const resumes = resumeParserService.listStoredResumes();
+
+    res.status(200).json({
+      error: false,
+      message: 'Stored resumes loaded successfully',
+      data: resumes
+    });
+  } catch (error) {
+    console.error('Error in listStoredResumes controller:', error);
+    res.status(500).json({
+      error: true,
+      message: error instanceof Error ? error.message : 'An unknown error occurred'
+    });
+  }
+};
+
+export const getStoredResume = async (req: Request, res: Response) => {
+  try {
+    const resumeId = req.params.id;
+    if (!resumeId) {
+      return res.status(400).json({
+        error: true,
+        message: 'Missing resume id'
+      });
+    }
+
+    const resume = resumeParserService.getStoredResumeById(resumeId);
+    if (!resume) {
+      return res.status(404).json({
+        error: true,
+        message: 'Stored resume not found'
+      });
+    }
+
+    res.status(200).json({
+      error: false,
+      message: 'Stored resume loaded successfully',
+      data: resume
+    });
+  } catch (error) {
+    console.error('Error in getStoredResume controller:', error);
+    res.status(500).json({
+      error: true,
+      message: error instanceof Error ? error.message : 'An unknown error occurred'
+    });
+  }
+};

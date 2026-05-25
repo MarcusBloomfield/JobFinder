@@ -5,16 +5,26 @@ interface JobListProps {
   jobs: Job[];
   evaluateMatch: (jobId: string) => Promise<void>;
   applyToJob: (jobId: string) => Promise<void>;
+  autoApplyMatchingJobs: () => Promise<void>;
   isLoading: boolean;
+  isBulkAutoApplying: boolean;
 }
 
 const JobList: React.FC<JobListProps> = ({
   jobs,
   evaluateMatch,
   applyToJob,
-  isLoading
+  autoApplyMatchingJobs,
+  isLoading,
+  isBulkAutoApplying
 }) => {
   const [visitedJobIds, setVisitedJobIds] = useState<Set<string>>(new Set());
+  const eligibleAutoApplyCount = jobs.filter(
+    (job) =>
+      (job.matchScore || 0) >= 60 &&
+      job.applicationStatus !== 'applied' &&
+      job.applicationStatus !== 'applying'
+  ).length;
 
   const handleJobClick = (job: Job) => {
     setVisitedJobIds((prev) => {
@@ -51,6 +61,20 @@ const JobList: React.FC<JobListProps> = ({
     <div className="job-list-container">
       <div className="job-list-header">
         <h3>Jobs {jobs.length > 0 && `(${jobs.length})`}</h3>
+        {jobs.length > 0 && (
+          <div className="job-list-header-actions">
+            <span className="bulk-auto-apply-summary">
+              {eligibleAutoApplyCount} jobs at 60%+ match
+            </span>
+            <button
+              className="bulk-auto-apply-button"
+              disabled={isLoading || isBulkAutoApplying || eligibleAutoApplyCount === 0}
+              onClick={() => void autoApplyMatchingJobs()}
+            >
+              {isBulkAutoApplying ? 'Auto Applying 60%+ Matches...' : 'Fully Auto Apply 60%+'}
+            </button>
+          </div>
+        )}
       </div>
 
       {isLoading ? (
@@ -88,13 +112,17 @@ const JobList: React.FC<JobListProps> = ({
                   <div className="job-card-actions">
                     <button
                       className="auto-apply-button"
-                      disabled={job.applicationStatus === 'applying'}
+                      disabled={job.applicationStatus === 'applying' || isBulkAutoApplying}
                       onClick={(event) => {
                         event.stopPropagation();
                         void applyToJob(job.id);
                       }}
                     >
-                      {job.applicationStatus === 'applying' ? 'Applying...' : 'Auto Apply'}
+                      {job.applicationStatus === 'applying'
+                        ? 'Applying...'
+                        : isBulkAutoApplying
+                          ? 'Batch Running...'
+                          : 'Auto Apply'}
                     </button>
                     {job.applicationStatus && job.applicationStatus !== 'idle' && (
                       <div className={getApplicationStatusClass(job.applicationStatus)}>

@@ -40,6 +40,8 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 // Parse resume
+router.get('/stored', resumeController.listStoredResumes);
+router.get('/stored/:id', resumeController.getStoredResume);
 router.post('/parse', upload.single('file'), resumeController.parseResume);
 
 export default router; 

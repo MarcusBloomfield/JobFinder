@@ -9,8 +9,32 @@ import './styles/App.css';
 // Main App component for the Job Finder application, providing the UI and logic integration
 const App: React.FC = () => {
     const [
-        {resume, searchTerms, jobs, isLoading, error, location, jobSearchAmount, seekLoginMessage, isSeekLoginLoading},
-        {uploadResume, searchJobs, searchJobsNoAI, evaluateMatch, applyToJob, loginToSeek, setLocation, setJobSearchAmount}
+        {
+            resume,
+            storedResumes,
+            searchTerms,
+            jobs,
+            isLoading,
+            isBulkAutoApplying,
+            error,
+            location,
+            jobSearchAmount,
+            seekLoginMessage,
+            isSeekLoginLoading,
+            isStoredResumesLoading
+        },
+        {
+            uploadResume,
+            selectStoredResume,
+            searchJobs,
+            searchJobsNoAI,
+            evaluateMatch,
+            applyToJob,
+            autoApplyMatchingJobs,
+            loginToSeek,
+            setLocation,
+            setJobSearchAmount
+        }
     ] = useJobSearch();
 
     return (
@@ -55,12 +79,23 @@ const App: React.FC = () => {
                                 </svg>
                                 <div>
                                     <p className="file-name">{resume.fileName}</p>
+                                    {resume.uploadedAt && (
+                                        <p className="resume-meta">
+                                            Stored {new Date(resume.uploadedAt).toLocaleString()}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                         </div>
-                    ) : (
-                        <ResumeUploader onUpload={uploadResume} isLoading={isLoading} />
-                    )}
+                    ) : null}
+                    <ResumeUploader
+                        onUpload={uploadResume}
+                        onSelectStoredResume={selectStoredResume}
+                        storedResumes={storedResumes}
+                        selectedResumeId={resume?.id}
+                        isLoading={isLoading}
+                        isStoredResumesLoading={isStoredResumesLoading}
+                    />
                 </div>
 
                 {resume && (
@@ -91,7 +126,9 @@ const App: React.FC = () => {
                                 jobs={jobs}
                                 evaluateMatch={evaluateMatch}
                                 applyToJob={applyToJob}
+                                autoApplyMatchingJobs={autoApplyMatchingJobs}
                                 isLoading={isLoading}
+                                isBulkAutoApplying={isBulkAutoApplying}
                             />
                         </div>
                     </>

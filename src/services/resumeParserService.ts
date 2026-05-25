@@ -36,6 +36,31 @@ export const parseResume = async (file: File): Promise<Resume> => {
   }
 };
 
+export const listStoredResumes = async (): Promise<Resume[]> => {
+  try {
+    const response = await axios.get(`${API_URL}/resume/stored`);
+
+    if (response.data && Array.isArray(response.data.data)) {
+      return response.data.data as Resume[];
+    }
+
+    throw new Error('Invalid response format from API');
+  } catch (error) {
+    console.error('Error listing stored resumes:', error);
+    return [];
+  }
+};
+
+export const getStoredResume = async (resumeId: string): Promise<Resume> => {
+  const response = await axios.get(`${API_URL}/resume/stored/${resumeId}`);
+
+  if (response.data && response.data.data) {
+    return response.data.data as Resume;
+  }
+
+  throw new Error('Invalid response format from API');
+};
+
 /**
  * Mock function for fallback when API is not available
  */
