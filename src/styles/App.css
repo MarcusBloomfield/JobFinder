@@ -131,12 +131,84 @@ button:disabled {
 }
 
 /* Resume Uploader */
-.resume-section, .search-section, .results-section {
+.resume-section, .application-profile-section, .search-section, .results-section {
   background-color: white;
   border-radius: 8px;
   padding: 1.5rem;
   margin-bottom: 2rem;
   box-shadow: var(--card-shadow);
+}
+
+.application-profile-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.application-profile-header h2 {
+  margin-bottom: 0.35rem;
+}
+
+.application-profile-description {
+  font-size: 0.95rem;
+  color: var(--gray-color);
+  max-width: 720px;
+}
+
+.application-profile-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  background-color: #e8f6f3;
+  color: #148f77;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.application-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.application-profile-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.application-profile-field span {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--dark-color);
+}
+
+.application-profile-field input,
+.application-profile-field select,
+.application-profile-field textarea {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #d5dce0;
+  border-radius: 6px;
+  background-color: white;
+  font: inherit;
+  color: var(--dark-color);
+}
+
+.application-profile-field input:focus,
+.application-profile-field select:focus,
+.application-profile-field textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.12);
+}
+
+.application-profile-field-wide {
+  grid-column: 1 / -1;
 }
 
 .resume-uploader .dropzone {
@@ -571,6 +643,11 @@ textarea {
 .application-status.failed {
   background-color: #fadbd8;
   color: #c0392b;
+}
+
+.application-status.skipped {
+  background-color: #eaf2f8;
+  color: #2874a6;
 }
 
 .application-message {

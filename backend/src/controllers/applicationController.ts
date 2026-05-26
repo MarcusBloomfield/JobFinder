@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { Job } from '../models/Job';
 import { Resume } from '../models/Resume';
+import { ApplicationProfile, DriversLicenceStatus, WorkRightsStatus } from '../models/ApplicationProfile';
 import * as applicationAgentService from '../services/applicationAgentService';
 
 const validateJob = (job: any): job is Job => {
@@ -24,9 +25,34 @@ const validateResume = (resume: any): resume is Resume => {
   );
 };
 
+const WORK_RIGHTS_STATUSES: WorkRightsStatus[] = [
+  '',
+  'australian_citizen_or_permanent_resident',
+  'temporary_visa_with_work_rights',
+  'require_employer_sponsorship',
+  'other'
+];
+
+const DRIVERS_LICENCE_STATUSES: DriversLicenceStatus[] = ['', 'full', 'provisional_or_learner', 'none'];
+
+const validateApplicationProfile = (profile: any): profile is ApplicationProfile | undefined => {
+  if (profile === undefined || profile === null) {
+    return true;
+  }
+
+  return (
+    typeof profile === 'object' &&
+    WORK_RIGHTS_STATUSES.includes(profile.workRightsStatus) &&
+    typeof profile.workRightsDetails === 'string' &&
+    DRIVERS_LICENCE_STATUSES.includes(profile.driversLicenceStatus) &&
+    typeof profile.salaryExpectationAnnual === 'string' &&
+    typeof profile.employerQuestionNotes === 'string'
+  );
+};
+
 export const applyToJob = async (req: Request, res: Response) => {
   try {
-    const { job, resume } = req.body;
+    const { job, resume, applicationProfile } = req.body;
 
     if (!job || !resume) {
       return res.status(400).json({
@@ -49,7 +75,15 @@ export const applyToJob = async (req: Request, res: Response) => {
       });
     }
 
-    const result = await applicationAgentService.applyToJob(job, resume);
+    if (!validateApplicationProfile(applicationProfile)) {
+      return res.status(400).json({
+        error: true,
+        message:
+          'Invalid applicationProfile object. Expected work rights, driver licence, salary, and notes fields.'
+      });
+    }
+
+    const result = await applicationAgentService.applyToJob(job, resume, applicationProfile);
 
     res.status(200).json({
       error: false,

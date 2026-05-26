@@ -1,5 +1,6 @@
 import React, {useState} from 'react';
 import ResumeUploader from './components/ResumeUploader';
+import ApplicationProfilePanel from './components/ApplicationProfilePanel';
 import SearchTerms from './components/SearchTerms';
 import LocationSelector from './components/LocationSelector';
 import JobSearchAmountSelector from './components/JobSearchAmountSelector';
@@ -21,7 +22,8 @@ const App: React.FC = () => {
             jobSearchAmount,
             seekLoginMessage,
             isSeekLoginLoading,
-            isStoredResumesLoading
+            isStoredResumesLoading,
+            applicationProfile
         },
         {
             uploadResume,
@@ -33,7 +35,8 @@ const App: React.FC = () => {
             autoApplyMatchingJobs,
             loginToSeek,
             setLocation,
-            setJobSearchAmount
+            setJobSearchAmount,
+            updateApplicationProfile
         }
     ] = useJobSearch();
 
@@ -97,6 +100,11 @@ const App: React.FC = () => {
                         isStoredResumesLoading={isStoredResumesLoading}
                     />
                 </div>
+
+                <ApplicationProfilePanel
+                    profile={applicationProfile}
+                    onChange={updateApplicationProfile}
+                />
 
                 {resume && (
                     <>

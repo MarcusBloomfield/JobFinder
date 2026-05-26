@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import OpenAI from 'openai';
 import { BrowserContext, chromium, Page } from 'playwright';
+import { ApplicationProfile } from '../models/ApplicationProfile';
 import { Job } from '../models/Job';
 import { Resume } from '../models/Resume';
 import { listStoredResumes } from './resumeParserService';
@@ -13,6 +14,8 @@ const MAX_RESUME_CHARS = Number(process.env.APPLY_AGENT_MAX_RESUME_CHARS || 8000
 const APPLY_AGENT_MODEL = process.env.APPLY_AGENT_MODEL || 'gpt-5.4';
 const APPLY_AGENT_REASONING_EFFORT: 'medium' = 'medium';
 const APPLY_AGENT_TIMEOUT_MS = Number(process.env.APPLY_AGENT_TIMEOUT_MS || 55000);
+const ALLOW_EXTERNAL_WEBSITE_AUTOMATION =
+  process.env.APPLY_AGENT_ALLOW_EXTERNAL_WEBSITES?.trim().toLowerCase() === 'true';
 const UPLOADS_DIR = path.resolve(__dirname, '../../uploads');
 const PLAYWRIGHT_PROFILE_DIR = path.resolve(__dirname, '../../.playwright/seek-profile');
 const APPLICATION_RUNS_DIR = path.resolve(__dirname, '../../.playwright/application-runs');
@@ -20,6 +23,7 @@ const ARTIFACTS_BASE_URL =
   process.env.APPLICATION_ARTIFACTS_BASE_URL?.trim() ||
   `http://localhost:${process.env.PORT || 5000}/artifacts`;
 const SEEK_LOGIN_URL = 'https://www.seek.com.au/login';
+const ALLOWED_AUTO_APPLY_DOMAIN_FAMILIES = ['seek.com', 'seek.com.au'];
 
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 const PHONE_PATTERN = /\b(?:\+?\d[\d()\-\s]{7,}\d)\b/;
@@ -27,8 +31,10 @@ const URL_PATTERN = /\bhttps?:\/\/[^\s]+/gi;
 const YEAR_PATTERN = /\b(?:19|20)\d{2}\b/g;
 const FORCE_CONTINUE_REVIEW_PATTERN =
   /year|experience|prefill|framework|language|selection|cover letter|resume|question|answer|skill|stack|technology/i;
+const COMMON_APPLICATION_PROFILE_REVIEW_PATTERN =
+  /work rights|working rights|right to work|authori[sz]ation|sponsorship|driver|licen[cs]e|salary|base salary|compensation|remuneration/i;
 const FORCE_CONTINUE_INSTRUCTION =
-  'Do not stop for routine employer questions, imperfect prefilled answers, or missing exact years. Continue by using conservative resume-grounded estimates, correcting existing selections and text, replacing weak prefilled cover-letter content, and uploading or replacing the resume if the page expects it.';
+  'Do not stop for routine employer questions, imperfect prefilled answers, missing exact years, or common screening questions when the applicationProfile provides an explicit answer. Continue by using conservative resume-grounded estimates, applicationProfile answers for work rights, licence, salary, and recurring screening questions, correcting existing selections and text, replacing weak prefilled cover-letter content, and uploading or replacing the resume if the page expects it.';
 const HUMAN_TYPING_DELAY_MS = 35;
 const SEQUENTIAL_TYPE_MAX_CHARS = 220;
 const REDACTED_PASSWORD_VALUE = '__redacted_password_present__';
@@ -53,14 +59,23 @@ interface CandidateProfile {
 }
 
 interface ResumeLibraryEntry {
-  id: string;
+  resumeRef: string;
   fileName: string;
+  fileType: Resume['fileType'];
   uploadedAt?: string;
   skills: string[];
   experienceHighlights: string[];
   educationHighlights: string[];
   estimatedCareerYears?: number;
   resumeSummary: string;
+}
+
+interface ResumeOption {
+  resumeRef: string;
+  resume: Resume;
+  candidateProfile: CandidateProfile;
+  filePath: string;
+  promptEntry: ResumeLibraryEntry;
 }
 
 interface PageElementSnapshot {
@@ -128,6 +143,7 @@ interface AgentDecision {
   reasoning: string;
   action: BrowserActionType;
   targetId?: number;
+  resumeRef?: string;
   text?: string;
   option?: string;
   checked?: boolean;
@@ -141,6 +157,8 @@ interface AgentDecision {
 interface ExecutedAction {
   action: BrowserActionType;
   targetId?: number;
+  resumeRef?: string;
+  resumeFileName?: string;
   text?: string;
   option?: string;
   checked?: boolean;
@@ -158,6 +176,7 @@ interface DecisionExecutionResult {
   executedAction: ExecutedAction;
   page: Page;
   pageChangeMessage?: string;
+  nextActiveResume?: ResumeOption;
 }
 
 interface BrowserSession {
@@ -173,12 +192,25 @@ export interface ApplicationArtifact {
 }
 
 export interface JobApplicationResult {
-  status: 'applied' | 'review_required' | 'failed';
+  status: 'applied' | 'review_required' | 'failed' | 'skipped';
   message: string;
   logs: string[];
   finalUrl: string;
   steps: number;
   artifacts: ApplicationArtifact[];
+}
+
+class ExternalWebsiteBlockedError extends Error {
+  blockedUrl: string;
+
+  constructor(blockedUrl: string) {
+    super(
+      `Skipped auto-apply because the application moved to an external website: ${blockedUrl}. ` +
+        'Set APPLY_AGENT_ALLOW_EXTERNAL_WEBSITES=true to allow it again.'
+    );
+    this.name = 'ExternalWebsiteBlockedError';
+    this.blockedUrl = blockedUrl;
+  }
 }
 
 const getOpenAIClient = (): OpenAI => {
@@ -259,6 +291,67 @@ const normalizeComparable = (value: string): string =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+
+const normalizeOptionalText = (value: string | undefined): string | undefined => {
+  const normalized = (value || '').trim();
+  return normalized ? normalized : undefined;
+};
+
+const getWorkRightsAnswer = (applicationProfile?: ApplicationProfile): string | undefined => {
+  if (!applicationProfile) {
+    return undefined;
+  }
+
+  switch (applicationProfile.workRightsStatus) {
+    case 'australian_citizen_or_permanent_resident':
+      return 'Australian citizen or permanent resident with full work rights.';
+    case 'temporary_visa_with_work_rights':
+      return normalizeOptionalText(applicationProfile.workRightsDetails)
+        ? `Temporary visa with current work rights. ${applicationProfile.workRightsDetails.trim()}`
+        : 'Temporary visa with current work rights.';
+    case 'require_employer_sponsorship':
+      return normalizeOptionalText(applicationProfile.workRightsDetails)
+        ? `Requires employer sponsorship. ${applicationProfile.workRightsDetails.trim()}`
+        : 'Requires employer sponsorship.';
+    case 'other':
+      return normalizeOptionalText(applicationProfile.workRightsDetails);
+    default:
+      return normalizeOptionalText(applicationProfile.workRightsDetails);
+  }
+};
+
+const getDriversLicenceAnswer = (applicationProfile?: ApplicationProfile): string | undefined => {
+  if (!applicationProfile) {
+    return undefined;
+  }
+
+  switch (applicationProfile.driversLicenceStatus) {
+    case 'full':
+      return 'Full driver licence.';
+    case 'provisional_or_learner':
+      return 'Provisional or learner driver licence.';
+    case 'none':
+      return 'No driver licence.';
+    default:
+      return undefined;
+  }
+};
+
+const buildApplicationProfileContext = (applicationProfile?: ApplicationProfile) => {
+  if (!applicationProfile) {
+    return null;
+  }
+
+  return {
+    workRightsStatus: applicationProfile.workRightsStatus || null,
+    workRightsAnswer: getWorkRightsAnswer(applicationProfile) || null,
+    workRightsDetails: normalizeOptionalText(applicationProfile.workRightsDetails) || null,
+    driversLicenceStatus: applicationProfile.driversLicenceStatus || null,
+    driversLicenceAnswer: getDriversLicenceAnswer(applicationProfile) || null,
+    salaryExpectationAnnual: normalizeOptionalText(applicationProfile.salaryExpectationAnnual) || null,
+    employerQuestionNotes: normalizeOptionalText(applicationProfile.employerQuestionNotes) || null
+  };
+};
 
 const slugify = (value: string): string =>
   value
@@ -379,7 +472,34 @@ const extractCandidateProfile = (resume: Resume): CandidateProfile => {
   };
 };
 
-const buildResumeLibraryContext = (primaryResume: Resume): ResumeLibraryEntry[] => {
+const buildResumePromptEntry = (
+  resume: Resume,
+  candidateProfile: CandidateProfile,
+  resumeRef: string
+): ResumeLibraryEntry => ({
+  resumeRef,
+  fileName: resume.fileName,
+  fileType: resume.fileType,
+  uploadedAt: resume.uploadedAt,
+  skills: candidateProfile.skills.slice(0, 10),
+  experienceHighlights: candidateProfile.experienceHighlights.slice(0, 6),
+  educationHighlights: candidateProfile.educationHighlights.slice(0, 4),
+  estimatedCareerYears: candidateProfile.estimatedCareerYears,
+  resumeSummary: compactText(candidateProfile.resumeSummary, 1600)
+});
+
+const buildResumeOption = (resume: Resume, resumeRef: string): ResumeOption => {
+  const candidateProfile = extractCandidateProfile(resume);
+  return {
+    resumeRef,
+    resume,
+    candidateProfile,
+    filePath: resolveResumeFilePath(resume),
+    promptEntry: buildResumePromptEntry(resume, candidateProfile, resumeRef)
+  };
+};
+
+const buildResumeLibraryOptions = (primaryResume: Resume): ResumeOption[] => {
   return listStoredResumes()
     .filter(storedResume => {
       if (storedResume.id === primaryResume.id) {
@@ -397,19 +517,48 @@ const buildResumeLibraryContext = (primaryResume: Resume): ResumeLibraryEntry[] 
       return true;
     })
     .slice(0, 6)
-    .map(storedResume => {
-      const profile = extractCandidateProfile(storedResume);
-      return {
-        id: storedResume.id,
-        fileName: storedResume.fileName,
-        uploadedAt: storedResume.uploadedAt,
-        skills: profile.skills.slice(0, 10),
-        experienceHighlights: profile.experienceHighlights.slice(0, 6),
-        educationHighlights: profile.educationHighlights.slice(0, 4),
-        estimatedCareerYears: profile.estimatedCareerYears,
-        resumeSummary: compactText(profile.resumeSummary, 1600)
-      };
-    });
+    .map((storedResume, index) => buildResumeOption(storedResume, `resume_${index + 2}`));
+};
+
+const buildAvailableResumeOptions = (primaryResume: Resume): ResumeOption[] => [
+  buildResumeOption(primaryResume, 'resume_1'),
+  ...buildResumeLibraryOptions(primaryResume)
+];
+
+const getResumeLibraryContext = (
+  activeResumeOption: ResumeOption,
+  availableResumeOptions: ResumeOption[]
+): ResumeLibraryEntry[] =>
+  availableResumeOptions
+    .filter(option => option.resumeRef !== activeResumeOption.resumeRef)
+    .map(option => option.promptEntry);
+
+const resolveResumeOptionForUpload = (
+  resumeRef: string | undefined,
+  activeResumeOption: ResumeOption,
+  availableResumeOptionsByRef: Map<string, ResumeOption>
+): ResumeOption => {
+  if (!resumeRef) {
+    return activeResumeOption;
+  }
+
+  const normalizedResumeRef = resumeRef.trim().toLowerCase();
+  if (!normalizedResumeRef) {
+    return activeResumeOption;
+  }
+
+  const requestedResumeOption = availableResumeOptionsByRef.get(normalizedResumeRef);
+  if (!requestedResumeOption) {
+    throw new Error(
+      `LLM upload_resume action referenced unknown resumeRef "${resumeRef}". Available resumeRefs: ${Array.from(
+        availableResumeOptionsByRef.values()
+      )
+        .map(option => option.resumeRef)
+        .join(', ')}.`
+    );
+  }
+
+  return requestedResumeOption;
 };
 
 const resolveResumeFilePath = (resume: Resume): string => {
@@ -752,6 +901,7 @@ const validateDecision = (value: unknown): AgentDecision => {
     action: action as BrowserActionType,
     reasoning: reasoning.trim(),
     targetId: typeof decision.targetId === 'number' ? decision.targetId : undefined,
+    resumeRef: typeof decision.resumeRef === 'string' ? decision.resumeRef.trim() : undefined,
     text: typeof decision.text === 'string' ? decision.text : undefined,
     option: typeof decision.option === 'string' ? decision.option : undefined,
     checked: typeof decision.checked === 'boolean' ? decision.checked : undefined,
@@ -815,6 +965,9 @@ type CandidateFieldKind =
   | 'linkedin'
   | 'github'
   | 'website'
+  | 'work_rights'
+  | 'drivers_licence'
+  | 'salary_expectation'
   | 'cover_letter'
   | 'motivation'
   | 'summary'
@@ -842,6 +995,37 @@ const inferFieldKind = (
   if (combinedHints.includes('linkedin')) return 'linkedin';
   if (combinedHints.includes('github')) return 'github';
   if (combinedHints.includes('website') || combinedHints.includes('portfolio') || combinedHints.includes('url')) return 'website';
+  if (
+    combinedHints.includes('work rights') ||
+    combinedHints.includes('working rights') ||
+    combinedHints.includes('right to work') ||
+    combinedHints.includes('work authorization') ||
+    combinedHints.includes('work authorisation') ||
+    combinedHints.includes('sponsorship') ||
+    combinedHints.includes('work visa')
+  ) {
+    return 'work_rights';
+  }
+  if (
+    combinedHints.includes('driver') ||
+    combinedHints.includes("driver's licence") ||
+    combinedHints.includes("driver's license") ||
+    combinedHints.includes('drivers licence') ||
+    combinedHints.includes('drivers license') ||
+    combinedHints.includes('licence') ||
+    combinedHints.includes('license')
+  ) {
+    return 'drivers_licence';
+  }
+  if (
+    combinedHints.includes('salary') ||
+    combinedHints.includes('base salary') ||
+    combinedHints.includes('expected pay') ||
+    combinedHints.includes('compensation') ||
+    combinedHints.includes('remuneration')
+  ) {
+    return 'salary_expectation';
+  }
   if (combinedHints.includes('cover letter') || combinedHints.includes('covering letter')) return 'cover_letter';
   if (
     combinedHints.includes('why are you interested') ||
@@ -892,6 +1076,28 @@ const elementMatchesFieldKind = (element: PageElementSnapshot, fieldKind: Candid
       return hints.includes('github');
     case 'website':
       return hints.includes('website') || hints.includes('portfolio') || hints.includes('url');
+    case 'work_rights':
+      return (
+        hints.includes('work rights') ||
+        hints.includes('working rights') ||
+        hints.includes('right to work') ||
+        hints.includes('sponsorship') ||
+        hints.includes('visa')
+      );
+    case 'drivers_licence':
+      return (
+        hints.includes('driver') ||
+        hints.includes('licence') ||
+        hints.includes('license')
+      );
+    case 'salary_expectation':
+      return (
+        hints.includes('salary') ||
+        hints.includes('base salary') ||
+        hints.includes('compensation') ||
+        hints.includes('remuneration') ||
+        hints.includes('pay')
+      );
     case 'cover_letter':
       return hints.includes('cover letter') || hints.includes('covering letter');
     case 'motivation':
@@ -943,7 +1149,8 @@ const resolveFallbackTypeTargetId = (
 const getCandidateValueForFieldKind = (
   fieldKind: CandidateFieldKind,
   candidateProfile: CandidateProfile,
-  job: Job
+  job: Job,
+  applicationProfile?: ApplicationProfile
 ): string | undefined => {
   switch (fieldKind) {
     case 'email':
@@ -962,6 +1169,12 @@ const getCandidateValueForFieldKind = (
       return candidateProfile.github;
     case 'website':
       return candidateProfile.website || candidateProfile.linkedin || candidateProfile.github;
+    case 'work_rights':
+      return getWorkRightsAnswer(applicationProfile);
+    case 'drivers_licence':
+      return getDriversLicenceAnswer(applicationProfile);
+    case 'salary_expectation':
+      return normalizeOptionalText(applicationProfile?.salaryExpectationAnnual);
     case 'cover_letter':
     case 'motivation':
       return buildCoverLetterText(job, candidateProfile);
@@ -978,7 +1191,8 @@ const resolveAutofillText = (
   decision: AgentDecision,
   snapshot: PageSnapshot,
   candidateProfile: CandidateProfile,
-  job: Job
+  job: Job,
+  applicationProfile?: ApplicationProfile
 ): string | undefined => {
   if (decision.action !== 'type') {
     return decision.text;
@@ -991,7 +1205,7 @@ const resolveAutofillText = (
   const fieldKind = inferFieldKind(decision, snapshot);
   const element = getSnapshotElement(snapshot, decision.targetId) || getActiveEditableElement(snapshot);
   if (!element) {
-    return getCandidateValueForFieldKind(fieldKind, candidateProfile, job);
+    return getCandidateValueForFieldKind(fieldKind, candidateProfile, job, applicationProfile);
   }
 
   const hints = [
@@ -1046,6 +1260,36 @@ const resolveAutofillText = (
     return candidateProfile.website || candidateProfile.linkedin || candidateProfile.github;
   }
 
+  if (
+    hints.includes('work rights') ||
+    hints.includes('working rights') ||
+    hints.includes('right to work') ||
+    hints.includes('authorisation') ||
+    hints.includes('authorization') ||
+    hints.includes('sponsorship') ||
+    hints.includes('visa')
+  ) {
+    return getWorkRightsAnswer(applicationProfile);
+  }
+
+  if (
+    hints.includes('driver') ||
+    hints.includes('licence') ||
+    hints.includes('license')
+  ) {
+    return getDriversLicenceAnswer(applicationProfile);
+  }
+
+  if (
+    hints.includes('salary') ||
+    hints.includes('base salary') ||
+    hints.includes('expected pay') ||
+    hints.includes('compensation') ||
+    hints.includes('remuneration')
+  ) {
+    return normalizeOptionalText(applicationProfile?.salaryExpectationAnnual);
+  }
+
   if (hints.includes('cover letter') || hints.includes('covering letter')) {
     return buildCoverLetterText(job, candidateProfile);
   }
@@ -1082,7 +1326,7 @@ const resolveAutofillText = (
     return candidateProfile.fullName;
   }
 
-  return getCandidateValueForFieldKind(fieldKind, candidateProfile, job);
+  return getCandidateValueForFieldKind(fieldKind, candidateProfile, job, applicationProfile);
 };
 
 const resolveSelectOption = (
@@ -1119,7 +1363,8 @@ const resolveSelectOption = (
 
 const shouldForceContinueAutomation = (
   decision: AgentDecision,
-  snapshot: PageSnapshot
+  snapshot: PageSnapshot,
+  applicationProfile?: ApplicationProfile
 ): boolean => {
   if (decision.action !== 'done' || decision.finalStatus !== 'review_required') {
     return false;
@@ -1137,20 +1382,64 @@ const shouldForceContinueAutomation = (
   }
 
   const combinedReason = `${decision.message || ''} ${decision.reasoning || ''}`;
-  return FORCE_CONTINUE_REVIEW_PATTERN.test(combinedReason);
+  if (FORCE_CONTINUE_REVIEW_PATTERN.test(combinedReason)) {
+    return true;
+  }
+
+  if (!COMMON_APPLICATION_PROFILE_REVIEW_PATTERN.test(combinedReason)) {
+    return false;
+  }
+
+  const normalizedReason = combinedReason.toLowerCase();
+  if (
+    (normalizedReason.includes('work rights') ||
+      normalizedReason.includes('working rights') ||
+      normalizedReason.includes('right to work') ||
+      normalizedReason.includes('authorisation') ||
+      normalizedReason.includes('authorization') ||
+      normalizedReason.includes('sponsorship')) &&
+    getWorkRightsAnswer(applicationProfile)
+  ) {
+    return true;
+  }
+
+  if (
+    (normalizedReason.includes('driver') ||
+      normalizedReason.includes('licence') ||
+      normalizedReason.includes('license')) &&
+    getDriversLicenceAnswer(applicationProfile)
+  ) {
+    return true;
+  }
+
+  if (
+    (normalizedReason.includes('salary') ||
+      normalizedReason.includes('base salary') ||
+      normalizedReason.includes('compensation') ||
+      normalizedReason.includes('remuneration')) &&
+    normalizeOptionalText(applicationProfile?.salaryExpectationAnnual)
+  ) {
+    return true;
+  }
+
+  return Boolean(normalizeOptionalText(applicationProfile?.employerQuestionNotes));
 };
 
 const planNextAction = async (
   job: Job,
-  resume: Resume,
-  candidateProfile: CandidateProfile,
-  resumeLibrary: ResumeLibraryEntry[],
+  activeResumeOption: ResumeOption,
+  availableResumeOptions: ResumeOption[],
+  applicationProfile: ApplicationProfile | undefined,
   snapshot: PageSnapshot,
   logs: string[],
   extraInstruction?: string,
   attemptFeedback?: string
 ): Promise<AgentDecision> => {
   const openai = getOpenAIClient();
+  const candidateProfile = activeResumeOption.candidateProfile;
+  const activeResume = activeResumeOption.promptEntry;
+  const resumeLibrary = getResumeLibraryContext(activeResumeOption, availableResumeOptions);
+  const applicationProfileContext = buildApplicationProfileContext(applicationProfile);
 
   const response = await waitWithTimeout(
     openai.chat.completions.create({
@@ -1164,8 +1453,10 @@ const planNextAction = async (
             'You are controlling a browser to complete a job application using only the provided structured page snapshot. ' +
             'Respond only with JSON. Be truthful and use only candidate information present in the provided profile or resume summary. ' +
             'Do not invent qualifications, salary expectations, or sponsorship answers. ' +
+            'Use applicationProfile for explicit user-provided answers to common employer questions such as work rights, driver licence status, salary expectation, and recurring screening notes. If applicationProfile contains the needed answer, continue the application instead of stopping for review. ' +
             'If a required employer question asks for years of experience or skill exposure, infer a conservative estimate from the resume evidence and choose the lowest supported answer rather than stopping. ' +
-            'Use the selected resume as the primary source of truth. You may use the provided resumeLibrary only for additional factual context from the user’s other stored resumes, and you must not merge contradictory claims. ' +
+            'Use activeResume as the current primary source of truth. You may use resumeLibrary only as alternative stored resumes that you can switch to later, and you must not merge contradictory claims across resumes. ' +
+            'If one of the alternative resumes is materially more relevant for this specific role, switch to it by using upload_resume with both targetId and that resumeRef. After you upload a different resume, keep later answers consistent with that uploaded resume. ' +
             'Prefer concise professional answers. ' +
             'You have a Playwright-backed browser toolset, not raw code execution. ' +
             'Use these actions only: click, double_click, hover, focus, clear, type, select, check, upload_resume, press, scroll, scroll_into_view, wait, wait_for_text, go_back, reload, done, fail. ' +
@@ -1184,10 +1475,10 @@ const planNextAction = async (
             'If attemptFeedback is provided, correct that exact failure and choose a different valid action when repeating the same action would be ineffective. ' +
             'Use page.validationMessages, element.invalid, element.value, and element.selectedOption to correct blocked or prefilled fields before giving up. ' +
             'Treat current input values, selected options, checked states, resume uploads, and cover-letter drafts as editable drafts that must be verified and corrected when inaccurate, generic, or mismatched. ' +
-            'If a resume or CV upload field is visible and the application expects one, use upload_resume to attach the current resume file. ' +
+            'If a resume or CV upload field is visible and the application expects one, use upload_resume to attach the most relevant available resume. Prefer switching resumes before answering detailed experience, profile, or motivation questions when that keeps the answers consistent with the uploaded resume. ' +
             'If a cover-letter or motivation field is visible, write a concise tailored answer grounded in the resume and job description. ' +
             'Use done only when the application is submitted or the page clearly shows a confirmation or only non-essential follow-up remains. ' +
-            'Use finalStatus=review_required only for captcha, MFA, legal declarations not supported by the resume, or truly missing personal information that cannot be conservatively inferred. ' +
+            'Use finalStatus=review_required only for captcha, MFA, legal declarations not supported by the resume, or truly missing personal information that is not already supplied by applicationProfile and cannot be conservatively inferred. ' +
             'If blocked or impossible, use fail with a concise message.'
         },
         {
@@ -1200,9 +1491,11 @@ const planNextAction = async (
                 description: compactText(job.description, 2500),
                 url: job.url
               },
+              applicationProfile: applicationProfileContext,
+              activeResume,
               candidateProfile,
               resumeLibrary,
-              resumeSummary: compactText(resume.content, MAX_RESUME_CHARS),
+              resumeSummary: compactText(activeResumeOption.resume.content, MAX_RESUME_CHARS),
               page: snapshot,
               recentLogs: logs.slice(-8),
               extraInstruction: extraInstruction || null,
@@ -1212,6 +1505,8 @@ const planNextAction = async (
                 action:
                   'click | double_click | hover | focus | clear | type | select | check | upload_resume | press | scroll | scroll_into_view | wait | wait_for_text | go_back | reload | done | fail',
                 targetId: 'number when targeting an element; optional for type when typing into the currently focused field after keyboard navigation',
+                resumeRef:
+                  'optional string for upload_resume actions when choosing a specific resume from activeResume or resumeLibrary; omit it to keep using the current activeResume',
                 text: 'string for type actions',
                 option: 'string for select actions',
                 checked: 'boolean for check actions',
@@ -1252,9 +1547,16 @@ const planNextAction = async (
 const getTargetLocator = (page: Page, targetId: number) =>
   page.locator(`[data-llm-target-id="${targetId}"]`).first();
 
-const prepareTargetLocator = async (page: Page, targetId: number) => {
+const prepareTargetLocator = async (
+  page: Page,
+  targetId: number,
+  options?: { requireVisible?: boolean }
+) => {
   const locator = getTargetLocator(page, targetId);
   await locator.waitFor({ state: 'attached', timeout: 5000 });
+  if (options?.requireVisible === false) {
+    return locator;
+  }
   try {
     await locator.scrollIntoViewIfNeeded({ timeout: 5000 });
   } catch {
@@ -1265,6 +1567,45 @@ const prepareTargetLocator = async (page: Page, targetId: number) => {
     }
   }
   return locator;
+};
+
+const resolveUploadTargetId = (
+  snapshot: PageSnapshot,
+  decision: AgentDecision
+): number | undefined => {
+  const requestedTarget = getSnapshotElement(snapshot, decision.targetId);
+  if (requestedTarget?.uploadable && !requestedTarget.disabled) {
+    return requestedTarget.id;
+  }
+
+  const uploadableElements = snapshot.elements.filter(element => element.uploadable && !element.disabled);
+  if (uploadableElements.length === 0) {
+    return undefined;
+  }
+
+  const rankUploadTarget = (element: PageElementSnapshot): number => {
+    const hints = `${getElementHints(element)} ${decision.message || ''} ${decision.reasoning || ''}`;
+    let score = 0;
+
+    if (/resume|cv|curriculum vitae/.test(hints)) {
+      score += 5;
+    }
+    if (/upload|attach/.test(hints)) {
+      score += 3;
+    }
+    if (/(pdf|doc|docx)/.test((element.accept || '').toLowerCase())) {
+      score += 2;
+    }
+
+    return score;
+  };
+
+  return uploadableElements
+    .slice()
+    .sort((left, right) => {
+      const scoreDifference = rankUploadTarget(right) - rankUploadTarget(left);
+      return scoreDifference !== 0 ? scoreDifference : left.id - right.id;
+    })[0]?.id;
 };
 
 const clearEditableTarget = async (page: Page, targetId: number, snapshot: PageSnapshot): Promise<void> => {
@@ -1356,6 +1697,56 @@ const getPageOrigin = (url: string): string => {
   }
 };
 
+const getDomainFamily = (url: string): string => {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return '';
+    }
+
+    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
+    const parts = hostname.split('.').filter(Boolean);
+    if (parts.length <= 2) {
+      return hostname;
+    }
+
+    const topLevelDomain = parts[parts.length - 1];
+    const secondLevelDomain = parts[parts.length - 2];
+    const hasCountryCodeSuffix = topLevelDomain.length === 2;
+    const hasCommonSecondLevelDomain = ['com', 'net', 'org', 'gov', 'edu', 'asn', 'id'].includes(
+      secondLevelDomain
+    );
+
+    return hasCountryCodeSuffix && hasCommonSecondLevelDomain && parts.length >= 3
+      ? parts.slice(-3).join('.')
+      : parts.slice(-2).join('.');
+  } catch {
+    return '';
+  }
+};
+
+const isAllowedAutomationUrl = (url: string): boolean => {
+  if (ALLOW_EXTERNAL_WEBSITE_AUTOMATION) {
+    return true;
+  }
+
+  const domainFamily = getDomainFamily(url);
+  if (!domainFamily) {
+    return true;
+  }
+
+  return ALLOWED_AUTO_APPLY_DOMAIN_FAMILIES.includes(domainFamily);
+};
+
+const ensureAllowedAutomationUrl = (url: string): void => {
+  if (!isAllowedAutomationUrl(url)) {
+    throw new ExternalWebsiteBlockedError(url);
+  }
+};
+
+const isExternalWebsiteBlockedError = (error: unknown): error is ExternalWebsiteBlockedError =>
+  error instanceof ExternalWebsiteBlockedError;
+
 const completeInteractivePageAction = async (
   currentPage: Page,
   action: () => Promise<void>
@@ -1387,6 +1778,7 @@ const completeInteractivePageAction = async (
       // Best effort only. Some external sites keep loading while still being usable.
     }
     await settlePage(nextPage);
+    ensureAllowedAutomationUrl(nextPage.url());
     try {
       await nextPage.bringToFront();
     } catch {
@@ -1402,6 +1794,7 @@ const completeInteractivePageAction = async (
   }
 
   await settlePage(currentPage);
+  ensureAllowedAutomationUrl(currentPage.url());
   return { page: currentPage };
 };
 
@@ -1493,9 +1886,18 @@ const verifyActionOutcome = (
     case 'upload_resume': {
       const beforeInvalid = Boolean(beforeElement?.invalid);
       const afterInvalid = Boolean(afterElement?.invalid);
+      const uploadedResumeLabel = executedAction.resumeFileName
+        ? ` "${executedAction.resumeFileName}"`
+        : '';
       return !afterInvalid || (beforeInvalid && !afterInvalid)
-        ? { success: true, message: `Verified the resume upload field no longer appears invalid.` }
-        : { success: true, message: `Resume upload was attempted. Review the screenshot if the page still needs confirmation.` };
+        ? {
+            success: true,
+            message: `Verified the resume upload field no longer appears invalid after uploading${uploadedResumeLabel}.`
+          }
+        : {
+            success: true,
+            message: `Resume upload${uploadedResumeLabel} was attempted. Review the screenshot if the page still needs confirmation.`
+          };
     }
     case 'wait_for_text': {
       const query = normalizeComparable(executedAction.textQuery || executedAction.text || '');
@@ -1542,9 +1944,10 @@ const verifyActionOutcome = (
 const executeDecision = async (
   page: Page,
   decision: AgentDecision,
-  resumeFilePath: string,
+  activeResumeOption: ResumeOption,
+  availableResumeOptionsByRef: Map<string, ResumeOption>,
+  applicationProfile: ApplicationProfile | undefined,
   snapshot: PageSnapshot,
-  candidateProfile: CandidateProfile,
   job: Job
 ): Promise<DecisionExecutionResult> => {
   switch (decision.action) {
@@ -1598,7 +2001,13 @@ const executeDecision = async (
       return { executedAction: { action: 'clear', targetId: decision.targetId }, page };
     }
     case 'type': {
-      const text = resolveAutofillText(decision, snapshot, candidateProfile, job);
+      const text = resolveAutofillText(
+        decision,
+        snapshot,
+        activeResumeOption.candidateProfile,
+        job,
+        applicationProfile
+      );
       const resolvedTargetId = resolveFallbackTypeTargetId(decision, snapshot);
       if (text === undefined) {
         const element =
@@ -1669,14 +2078,38 @@ const executeDecision = async (
       };
     }
     case 'upload_resume': {
-      if (!decision.targetId) {
-        throw new Error('LLM upload_resume action did not include a targetId.');
+      let resolvedTargetId = resolveUploadTargetId(snapshot, decision);
+      if (!resolvedTargetId) {
+        throw new Error('LLM upload_resume action could not resolve an upload target from the current page snapshot.');
       }
-      await (await prepareTargetLocator(page, decision.targetId)).setInputFiles(resumeFilePath, {
-        timeout: 10000
-      });
+      const selectedResumeOption = resolveResumeOptionForUpload(
+        decision.resumeRef,
+        activeResumeOption,
+        availableResumeOptionsByRef
+      );
+      let locator;
+      try {
+        locator = await prepareTargetLocator(page, resolvedTargetId, { requireVisible: false });
+      } catch {
+        const refreshedSnapshot = await capturePageSnapshot(page);
+        resolvedTargetId = resolveUploadTargetId(refreshedSnapshot, decision);
+        if (!resolvedTargetId) {
+          throw new Error('No uploadable resume input is currently available on the page.');
+        }
+        locator = await prepareTargetLocator(page, resolvedTargetId, { requireVisible: false });
+      }
+      await locator.setInputFiles(selectedResumeOption.filePath, { timeout: 10000 });
       await settlePage(page);
-      return { executedAction: { action: 'upload_resume', targetId: decision.targetId }, page };
+      return {
+        executedAction: {
+          action: 'upload_resume',
+          targetId: resolvedTargetId,
+          resumeRef: selectedResumeOption.resumeRef,
+          resumeFileName: selectedResumeOption.resume.fileName
+        },
+        page,
+        nextActiveResume: selectedResumeOption
+      };
     }
     case 'press': {
       const resolved = await completeInteractivePageAction(page, async () => {
@@ -1742,10 +2175,16 @@ const executeDecision = async (
   }
 };
 
-export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicationResult> => {
-  const candidateProfile = extractCandidateProfile(resume);
-  const resumeLibrary = buildResumeLibraryContext(resume);
-  const resumeFilePath = resolveResumeFilePath(resume);
+export const applyToJob = async (
+  job: Job,
+  resume: Resume,
+  applicationProfile?: ApplicationProfile
+): Promise<JobApplicationResult> => {
+  const availableResumeOptions = buildAvailableResumeOptions(resume);
+  const availableResumeOptionsByRef = new Map(
+    availableResumeOptions.map(option => [option.resumeRef.toLowerCase(), option] as const)
+  );
+  let activeResumeOption = availableResumeOptions[0];
   const runArtifactsDir = createRunArtifactsDir(job);
   await closeSeekLoginSessionIfOpen();
   const session = await launchBrowserSession();
@@ -1755,13 +2194,20 @@ export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicati
 
   try {
     let currentPage = session.page;
+    logs.push(
+      `Available resumes: ${availableResumeOptions
+        .map(option => `${option.resumeRef}=${option.resume.fileName}${option.resumeRef === activeResumeOption.resumeRef ? ' (active)' : ''}`)
+        .join('; ')}`
+    );
     logs.push(`Opening job page: ${job.url}`);
     await currentPage.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await settlePage(currentPage);
+    ensureAllowedAutomationUrl(currentPage.url());
     artifacts.push(await captureRunScreenshot(currentPage, runArtifactsDir, 0, 'initial-page'));
 
     for (let step = 1; step <= MAX_AGENT_STEPS; step += 1) {
       lastSnapshot = await capturePageSnapshot(currentPage);
+      ensureAllowedAutomationUrl(lastSnapshot.url);
 
       const completionMessage = detectCompletion(lastSnapshot);
       if (completionMessage) {
@@ -1787,25 +2233,25 @@ export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicati
         try {
           let decision = await planNextAction(
             job,
-            resume,
-            candidateProfile,
-            resumeLibrary,
+            activeResumeOption,
+            availableResumeOptions,
+            applicationProfile,
             workingSnapshot,
             logs,
             stepExtraInstruction,
             attemptFeedback
           );
 
-          if (shouldForceContinueAutomation(decision, workingSnapshot)) {
+          if (shouldForceContinueAutomation(decision, workingSnapshot, applicationProfile)) {
             logs.push(
               `${attemptLabel}: continuing instead of review - ${decision.message || decision.reasoning.slice(0, 180)}`
             );
             stepExtraInstruction = FORCE_CONTINUE_INSTRUCTION;
             decision = await planNextAction(
               job,
-              resume,
-              candidateProfile,
-              resumeLibrary,
+              activeResumeOption,
+              availableResumeOptions,
+              applicationProfile,
               workingSnapshot,
               logs,
               stepExtraInstruction,
@@ -1848,11 +2294,20 @@ export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicati
           const execution = await executeDecision(
             currentPage,
             decision,
-            resumeFilePath,
+            activeResumeOption,
+            availableResumeOptionsByRef,
+            applicationProfile,
             workingSnapshot,
-            candidateProfile,
             job
           );
+          if (execution.nextActiveResume) {
+            const previousResumeRef = activeResumeOption.resumeRef;
+            activeResumeOption = execution.nextActiveResume;
+            logs.push(
+              `${attemptLabel} resume - using ${activeResumeOption.resumeRef} (${activeResumeOption.resume.fileName})` +
+                `${activeResumeOption.resumeRef !== previousResumeRef ? ' as the active resume.' : '.'}`
+            );
+          }
           currentPage = execution.page;
           session.page = currentPage;
           if (execution.pageChangeMessage) {
@@ -1895,6 +2350,7 @@ export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicati
             `Step ${step} retry ${attempt + 1}/${MAX_STEP_RECOVERY_ATTEMPTS} - ${verification.message}`
           );
         } catch (error) {
+          const blockedExternalWebsite = isExternalWebsiteBlockedError(error);
           const message = error instanceof Error ? error.message : 'Unknown step error';
           try {
             artifacts.push(
@@ -1902,11 +2358,18 @@ export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicati
                 currentPage,
                 runArtifactsDir,
                 step,
-                `step-${step}-attempt-${attempt}-error`
+                blockedExternalWebsite
+                  ? `step-${step}-attempt-${attempt}-skipped-external`
+                  : `step-${step}-attempt-${attempt}-error`
               )
             );
           } catch {
             // Ignore screenshot failures while recovering from the original step error.
+          }
+
+          if (blockedExternalWebsite) {
+            logs.push(`${attemptLabel} skipped - ${message}`);
+            throw error;
           }
 
           logs.push(`${attemptLabel} failed - ${message}`);
@@ -1948,20 +2411,27 @@ export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicati
       artifacts
     };
   } catch (error) {
+    const blockedExternalWebsite = isExternalWebsiteBlockedError(error);
+    const blockedUrl = blockedExternalWebsite ? error.blockedUrl : undefined;
     const message = error instanceof Error ? error.message : 'Unknown application error';
     try {
       artifacts.push(
-        await captureRunScreenshot(session.page, runArtifactsDir, logs.length + 1, 'failure-state')
+        await captureRunScreenshot(
+          session.page,
+          runArtifactsDir,
+          logs.length + 1,
+          blockedExternalWebsite ? 'skipped-external-website' : 'failure-state'
+        )
       );
     } catch {
       // Ignore screenshot failures while reporting the original apply error.
     }
-    logs.push(`Failed: ${message}`);
+    logs.push(`${blockedExternalWebsite ? 'Skipped' : 'Failed'}: ${message}`);
     return {
-      status: 'failed',
+      status: blockedExternalWebsite ? 'skipped' : 'failed',
       message,
       logs,
-      finalUrl: lastSnapshot?.url || job.url,
+      finalUrl: blockedUrl || lastSnapshot?.url || job.url,
       steps: logs.length,
       artifacts
     };

@@ -1,11 +1,12 @@
 import axios from 'axios';
 import { Job } from '../models/Job';
 import { Resume } from '../models/Resume';
+import { ApplicationProfile } from '../models/ApplicationProfile';
 
 const API_URL = 'http://localhost:5000/api';
 
 export interface JobApplicationResult {
-  status: 'applied' | 'review_required' | 'failed';
+  status: 'applied' | 'review_required' | 'failed' | 'skipped';
   message: string;
   logs: string[];
   finalUrl: string;
@@ -24,8 +25,12 @@ export interface SeekLoginResult {
   url: string;
 }
 
-export const applyToJob = async (job: Job, resume: Resume): Promise<JobApplicationResult> => {
-  const response = await axios.post(`${API_URL}/apply/job`, { job, resume });
+export const applyToJob = async (
+  job: Job,
+  resume: Resume,
+  applicationProfile: ApplicationProfile
+): Promise<JobApplicationResult> => {
+  const response = await axios.post(`${API_URL}/apply/job`, { job, resume, applicationProfile });
 
   if (response.data && response.data.data) {
     return response.data.data as JobApplicationResult;

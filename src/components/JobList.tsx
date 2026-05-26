@@ -23,7 +23,8 @@ const JobList: React.FC<JobListProps> = ({
     (job) =>
       (job.matchScore || 0) >= 60 &&
       job.applicationStatus !== 'applied' &&
-      job.applicationStatus !== 'applying'
+      job.applicationStatus !== 'applying' &&
+      job.applicationStatus !== 'skipped'
   ).length;
 
   const handleJobClick = (job: Job) => {
@@ -50,6 +51,8 @@ const JobList: React.FC<JobListProps> = ({
         return 'application-status review-required';
       case 'failed':
         return 'application-status failed';
+      case 'skipped':
+        return 'application-status skipped';
       case 'applying':
         return 'application-status applying';
       default:
@@ -128,6 +131,8 @@ const JobList: React.FC<JobListProps> = ({
                       <div className={getApplicationStatusClass(job.applicationStatus)}>
                         {job.applicationStatus === 'review_required'
                           ? 'Needs Review'
+                          : job.applicationStatus === 'skipped'
+                            ? 'Skipped'
                           : job.applicationStatus.charAt(0).toUpperCase() + job.applicationStatus.slice(1)}
                       </div>
                     )}

@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Resume } from '../models/Resume';
 import { Job } from '../models/Job';
+import {
+  ApplicationProfile,
+  DEFAULT_APPLICATION_PROFILE,
+  normalizeApplicationProfile
+} from '../models/ApplicationProfile';
 import { getStoredResume, listStoredResumes, parseResume } from '../services/resumeParserService';
 import { generateSearchTerms, evaluateJobMatch, evaluateJobMatchesBulk } from '../services/openAiService';
 import { scrapeJobs } from '../services/scrapeService';
@@ -19,6 +24,7 @@ interface JobSearchState {
   seekLoginMessage: string | null;
   isSeekLoginLoading: boolean;
   isStoredResumesLoading: boolean;
+  applicationProfile: ApplicationProfile;
 }
 
 interface JobSearchActions {
@@ -32,11 +38,51 @@ interface JobSearchActions {
   loginToSeek: () => Promise<void>;
   setLocation: (location: string) => void;
   setJobSearchAmount: (amount: number) => void;
+  updateApplicationProfile: (updates: Partial<ApplicationProfile>) => void;
+}
+
+interface ApplyRunOutcome {
+  shouldStopBatch: boolean;
+  stopReason?: string;
 }
 
 const getPageLimitForMaxJobs = (maxJobs: number): number => {
   return Math.max(1, Math.min(10, Math.ceil(maxJobs / 20)));
 };
+
+const APPLICATION_PROFILE_STORAGE_KEY = 'jobfinder.applicationProfile';
+
+const loadStoredApplicationProfile = (): ApplicationProfile => {
+  if (typeof window === 'undefined') {
+    return { ...DEFAULT_APPLICATION_PROFILE };
+  }
+
+  try {
+    const raw = window.localStorage.getItem(APPLICATION_PROFILE_STORAGE_KEY);
+    return raw ? normalizeApplicationProfile(JSON.parse(raw)) : { ...DEFAULT_APPLICATION_PROFILE };
+  } catch {
+    return { ...DEFAULT_APPLICATION_PROFILE };
+  }
+};
+
+const isFatalBatchApplyErrorMessage = (message: string): boolean => {
+  const normalized = message.toLowerCase();
+
+  return (
+    normalized.includes('429') ||
+    normalized.includes('quota') ||
+    normalized.includes('billing') ||
+    normalized.includes('insufficient_quota') ||
+    normalized.includes('rate limit') ||
+    normalized.includes('openai api key is not configured') ||
+    normalized.includes('incorrect api key') ||
+    normalized.includes('invalid api key') ||
+    normalized.includes('401')
+  );
+};
+
+const buildBatchStopMessage = (reason: string): string =>
+  `Fully automatic apply stopped because the application service hit a blocking upstream error: ${reason}`;
 
 const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   const [resume, setResume] = useState<Resume | null>(null);
@@ -51,6 +97,9 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   const [seekLoginMessage, setSeekLoginMessage] = useState<string | null>(null);
   const [isSeekLoginLoading, setIsSeekLoginLoading] = useState<boolean>(false);
   const [isStoredResumesLoading, setIsStoredResumesLoading] = useState<boolean>(false);
+  const [applicationProfile, setApplicationProfile] = useState<ApplicationProfile>(() =>
+    loadStoredApplicationProfile()
+  );
 
   const upsertStoredResume = (nextResume: Resume): void => {
     setStoredResumes(currentResumes => {
@@ -102,6 +151,17 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
 
     void loadStoredResumes();
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(
+      APPLICATION_PROFILE_STORAGE_KEY,
+      JSON.stringify(normalizeApplicationProfile(applicationProfile))
+    );
+  }, [applicationProfile]);
 
   const uploadResume = async (file: File): Promise<void> => {
     setIsLoading(true);
@@ -238,7 +298,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     }
   };
 
-  const applyToJobInternal = async (job: Job, activeResume: Resume): Promise<void> => {
+  const applyToJobInternal = async (job: Job, activeResume: Resume): Promise<ApplyRunOutcome> => {
     setError(null);
     setJobs(currentJobs =>
       currentJobs.map(currentJob =>
@@ -255,7 +315,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     );
 
     try {
-      const result = await autoApplyToJob(job, activeResume);
+      const result = await autoApplyToJob(job, activeResume, applicationProfile);
 
       setJobs(currentJobs =>
         currentJobs.map(currentJob =>
@@ -270,6 +330,11 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
             : currentJob
         )
       );
+
+      return {
+        shouldStopBatch: result.status === 'failed' && isFatalBatchApplyErrorMessage(result.message),
+        stopReason: result.status === 'failed' ? result.message : undefined
+      };
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to auto-apply for this job';
@@ -287,6 +352,11 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
         )
       );
       console.error('Auto-apply error:', error);
+
+      return {
+        shouldStopBatch: isFatalBatchApplyErrorMessage(message),
+        stopReason: message
+      };
     }
   };
 
@@ -314,7 +384,8 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       job =>
         (job.matchScore || 0) >= 60 &&
         job.applicationStatus !== 'applied' &&
-        job.applicationStatus !== 'applying'
+        job.applicationStatus !== 'applying' &&
+        job.applicationStatus !== 'skipped'
     );
 
     if (eligibleJobs.length === 0) {
@@ -341,8 +412,34 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     );
 
     try {
-      for (const job of eligibleJobs) {
-        await applyToJobInternal(job, resume);
+      for (let index = 0; index < eligibleJobs.length; index += 1) {
+        const job = eligibleJobs[index];
+        const outcome = await applyToJobInternal(job, resume);
+
+        if (outcome.shouldStopBatch) {
+          const stopReason = outcome.stopReason || 'Unknown upstream application error';
+          const remainingJobIds = new Set(eligibleJobs.slice(index + 1).map(remainingJob => remainingJob.id));
+
+          if (remainingJobIds.size > 0) {
+            const batchStopMessage = buildBatchStopMessage(stopReason);
+            setJobs(currentJobs =>
+              currentJobs.map(currentJob =>
+                remainingJobIds.has(currentJob.id)
+                  ? {
+                      ...currentJob,
+                      applicationStatus: currentJob.applicationStatus === 'applying' ? 'idle' : currentJob.applicationStatus,
+                      applicationMessage: batchStopMessage,
+                      applicationLogs: [],
+                      applicationArtifacts: []
+                    }
+                  : currentJob
+              )
+            );
+          }
+
+          setError(buildBatchStopMessage(stopReason));
+          break;
+        }
       }
     } finally {
       setIsBulkAutoApplying(false);
@@ -370,6 +467,15 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     setLocation(newLocation);
   };
 
+  const updateApplicationProfile = (updates: Partial<ApplicationProfile>): void => {
+    setApplicationProfile(currentProfile =>
+      normalizeApplicationProfile({
+        ...currentProfile,
+        ...updates
+      })
+    );
+  };
+
   return [
     {
       resume,
@@ -383,7 +489,8 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       jobSearchAmount,
       seekLoginMessage,
       isSeekLoginLoading,
-      isStoredResumesLoading
+      isStoredResumesLoading,
+      applicationProfile
     },
     {
       uploadResume,
@@ -395,7 +502,8 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       autoApplyMatchingJobs,
       loginToSeek,
       setLocation: updateLocation,
-      setJobSearchAmount
+      setJobSearchAmount,
+      updateApplicationProfile
     }
   ];
 };
