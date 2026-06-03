@@ -7,7 +7,12 @@ import {
   DEFAULT_APPLICATION_PROFILE,
   normalizeApplicationProfile
 } from '../models/ApplicationProfile';
-import { ApplicationTrackingSummary, ApplicationTriggerSource, TrackedJobApplication } from '../models/ApplicationTracking';
+import {
+  ApplicationProgressStage,
+  ApplicationTrackingSummary,
+  ApplicationTriggerSource,
+  TrackedJobApplication
+} from '../models/ApplicationTracking';
 import { getStoredResume, listStoredResumes, parseResume } from '../services/resumeParserService';
 import { generateSearchTerms, evaluateJobMatch, evaluateJobMatchesBulk } from '../services/openAiService';
 import { scrapeJobs } from '../services/scrapeService';
@@ -19,6 +24,7 @@ import {
   enrichTrackedApplicationFromListing,
   normalizeTrackedJobUrl,
   openSeekLoginBrowser,
+  updateTrackedApplicationProgressStage,
   updateApplicationJobDetails
 } from '../services/applicationService';
 
@@ -55,6 +61,10 @@ interface JobSearchActions {
   updateApplicationProfile: (updates: Partial<ApplicationProfile>) => void;
   refreshApplicationTracking: () => Promise<void>;
   updateTrackedApplicationJobDetails: (applicationId: string, jobDetails: JobDetails) => Promise<void>;
+  updateTrackedApplicationProgress: (
+    applicationId: string,
+    stage: ApplicationProgressStage
+  ) => Promise<void>;
   enrichTrackedApplication: (applicationId: string) => Promise<void>;
 }
 
@@ -190,6 +200,19 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     } finally {
       setIsApplicationTrackingLoading(false);
     }
+  };
+
+  const syncTrackedApplicationIntoJobs = (updatedApplication: TrackedJobApplication): void => {
+    const normalizedUpdatedUrl = normalizeTrackedJobUrl(updatedApplication.jobUrl);
+
+    setJobs(currentJobs =>
+      currentJobs.map(job =>
+        job.applicationTrackingId === updatedApplication.id ||
+        normalizeTrackedJobUrl(job.url) === normalizedUpdatedUrl
+          ? mergeTrackedApplicationIntoJob(job, updatedApplication)
+          : job
+      )
+    );
   };
 
   const hydrateJobsWithTrackedApplications = async (scrapedJobs: Job[]): Promise<Job[]> => {
@@ -571,26 +594,22 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     jobDetails: JobDetails
   ): Promise<void> => {
     const updatedApplication = await updateApplicationJobDetails(applicationId, jobDetails);
+    syncTrackedApplicationIntoJobs(updatedApplication);
+    await loadApplicationTrackingData();
+  };
 
-    setApplicationHistory(currentHistory =>
-      currentHistory.map(application =>
-        application.id === updatedApplication.id ? updatedApplication : application
-      )
-    );
-    setApplicationTrackingSummary(currentSummary =>
-      currentSummary
-        ? {
-            ...currentSummary,
-            recentApplications: currentSummary.recentApplications.map(application =>
-              application.id === updatedApplication.id ? updatedApplication : application
-            )
-          }
-        : currentSummary
-    );
+  const updateTrackedApplicationProgress = async (
+    applicationId: string,
+    stage: ApplicationProgressStage
+  ): Promise<void> => {
+    const updatedApplication = await updateTrackedApplicationProgressStage(applicationId, stage);
+    syncTrackedApplicationIntoJobs(updatedApplication);
+    await loadApplicationTrackingData();
   };
 
   const enrichTrackedApplication = async (applicationId: string): Promise<void> => {
     const updatedApplication = await enrichTrackedApplicationFromListing(applicationId);
+    syncTrackedApplicationIntoJobs(updatedApplication);
 
     setApplicationHistory(currentHistory =>
       currentHistory.map(application =>
@@ -642,6 +661,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       updateApplicationProfile,
       refreshApplicationTracking: loadApplicationTrackingData,
       updateTrackedApplicationJobDetails,
+      updateTrackedApplicationProgress,
       enrichTrackedApplication
     }
   ];

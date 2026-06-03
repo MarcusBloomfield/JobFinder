@@ -33,6 +33,8 @@ export interface JobDetails {
   suburbOrPostcode: string;
   applicationMethod: JobApplicationMethod;
   applicationSubmittedDate: string;
+  interviewedForJob: boolean;
+  employedForJob: boolean;
 }
 
 export const DEFAULT_JOB_DETAILS: JobDetails = {
@@ -44,7 +46,9 @@ export const DEFAULT_JOB_DETAILS: JobDetails = {
   jobLocation: '',
   suburbOrPostcode: '',
   applicationMethod: '',
-  applicationSubmittedDate: ''
+  applicationSubmittedDate: '',
+  interviewedForJob: false,
+  employedForJob: false
 };
 
 const normalizeString = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
@@ -54,6 +58,8 @@ const normalizeDate = (value: unknown): string => {
   const match = normalized.match(/^(\d{4}-\d{2}-\d{2})/);
   return match ? match[1] : '';
 };
+
+const normalizeBoolean = (value: unknown): boolean => value === true;
 
 export const normalizeJobDetails = (candidate: Partial<JobDetails> | null | undefined): JobDetails => {
   const applicationMethod = candidate?.applicationMethod;
@@ -69,6 +75,8 @@ export const normalizeJobDetails = (candidate: Partial<JobDetails> | null | unde
     applicationMethod: JOB_APPLICATION_METHODS.includes(applicationMethod as JobApplicationMethod)
       ? (applicationMethod as JobApplicationMethod)
       : '',
-    applicationSubmittedDate: normalizeDate(candidate?.applicationSubmittedDate)
+    applicationSubmittedDate: normalizeDate(candidate?.applicationSubmittedDate),
+    interviewedForJob: normalizeBoolean(candidate?.interviewedForJob),
+    employedForJob: normalizeBoolean(candidate?.employedForJob)
   };
 };

@@ -30,6 +30,7 @@ const { DatabaseSync } = require('node:sqlite') as {
 
 export type TrackedApplicationStatus = 'applying' | 'applied' | 'review_required' | 'failed' | 'skipped';
 export type ApplicationTriggerSource = 'manual' | 'bulk';
+export type ApplicationProgressStage = 'applied' | 'interviewed';
 
 export interface TrackedJobApplication {
   id: string;
@@ -63,6 +64,8 @@ export interface ApplicationActivityPoint {
   day: string;
   totalCount: number;
   appliedCount: number;
+  interviewedCount: number;
+  employedCount: number;
   reviewRequiredCount: number;
   failedCount: number;
   skippedCount: number;
@@ -73,8 +76,13 @@ export interface ApplicationTrackingSummary {
   completedApplications: number;
   successfulApplications: number;
   successRate: number;
+  appliedCount: number;
+  interviewedCount: number;
+  employedCount: number;
   statusCounts: Record<TrackedApplicationStatus, number>;
   recentActivity: ApplicationActivityPoint[];
+  activityCalendar: ApplicationActivityPoint[];
+  activityYears: number[];
   recentApplications: TrackedJobApplication[];
 }
 
@@ -109,15 +117,6 @@ interface TrackedApplicationRow {
 interface SummaryCountRow {
   status: TrackedApplicationStatus;
   count: number;
-}
-
-interface ActivityRow {
-  day: string;
-  total_count: number;
-  applied_count: number;
-  review_required_count: number;
-  failed_count: number;
-  skipped_count: number;
 }
 
 interface ColumnInfoRow {
@@ -461,22 +460,112 @@ const getLatestTrackedApplicationByNormalizedUrl = (normalizedJobUrl: string): T
   return row ? mapTrackedApplicationRow(row) : null;
 };
 
-const buildRecentActivity = (rows: ActivityRow[], days: number): ApplicationActivityPoint[] => {
-  const today = new Date();
-  const pointsByDay = new Map(
-    rows.map(row => [
-      row.day,
-      {
-        day: row.day,
-        totalCount: Number(row.total_count) || 0,
-        appliedCount: Number(row.applied_count) || 0,
-        reviewRequiredCount: Number(row.review_required_count) || 0,
-        failedCount: Number(row.failed_count) || 0,
-        skippedCount: Number(row.skipped_count) || 0
-      }
-    ] as const)
-  );
+const getDateOnlyFromTimestamp = (value?: string): string | null => {
+  const normalized = normalizeOptionalText(value);
+  if (!normalized) {
+    return null;
+  }
 
+  return normalized.slice(0, 10);
+};
+
+const getSubmittedDateForProgressUpdate = (
+  application: TrackedJobApplication,
+  fallbackTimestamp: string
+): string =>
+  application.jobDetails.applicationSubmittedDate ||
+  getDateOnlyFromTimestamp(application.completedAt) ||
+  getDateOnlyFromTimestamp(application.updatedAt) ||
+  getDateOnlyFromTimestamp(application.createdAt) ||
+  toDateOnly(fallbackTimestamp);
+
+const getManualProgressMessage = (
+  stage: ApplicationProgressStage,
+  application: TrackedJobApplication
+): string => {
+  if (application.status === 'applied') {
+    return application.message;
+  }
+
+  return stage === 'interviewed'
+    ? 'Marked as interviewed from the progress view.'
+    : 'Marked as applied from the progress view.';
+};
+
+const buildActivityCalendar = (applications: TrackedJobApplication[]): ApplicationActivityPoint[] => {
+  const pointsByDay = new Map<string, ApplicationActivityPoint>();
+
+  applications.forEach(application => {
+    const appliedDay =
+      application.jobDetails.applicationSubmittedDate ||
+      getDateOnlyFromTimestamp(application.completedAt) ||
+      getDateOnlyFromTimestamp(application.createdAt);
+
+    if (appliedDay) {
+      const point = pointsByDay.get(appliedDay) || {
+        day: appliedDay,
+        totalCount: 0,
+        appliedCount: 0,
+        interviewedCount: 0,
+        employedCount: 0,
+        reviewRequiredCount: 0,
+        failedCount: 0,
+        skippedCount: 0
+      };
+      point.appliedCount += 1;
+      pointsByDay.set(appliedDay, point);
+    }
+
+    const updateDay =
+      getDateOnlyFromTimestamp(application.updatedAt) ||
+      getDateOnlyFromTimestamp(application.completedAt) ||
+      getDateOnlyFromTimestamp(application.createdAt);
+
+    if (updateDay && application.jobDetails.interviewedForJob) {
+      const point = pointsByDay.get(updateDay) || {
+        day: updateDay,
+        totalCount: 0,
+        appliedCount: 0,
+        interviewedCount: 0,
+        employedCount: 0,
+        reviewRequiredCount: 0,
+        failedCount: 0,
+        skippedCount: 0
+      };
+      point.interviewedCount += 1;
+      pointsByDay.set(updateDay, point);
+    }
+
+    if (updateDay && application.jobDetails.employedForJob) {
+      const point = pointsByDay.get(updateDay) || {
+        day: updateDay,
+        totalCount: 0,
+        appliedCount: 0,
+        interviewedCount: 0,
+        employedCount: 0,
+        reviewRequiredCount: 0,
+        failedCount: 0,
+        skippedCount: 0
+      };
+      point.employedCount += 1;
+      pointsByDay.set(updateDay, point);
+    }
+  });
+
+  return Array.from(pointsByDay.values())
+    .map(point => ({
+      ...point,
+      totalCount: point.appliedCount + point.interviewedCount + point.employedCount
+    }))
+    .sort((left, right) => left.day.localeCompare(right.day));
+};
+
+const buildRecentActivity = (
+  activityCalendar: ApplicationActivityPoint[],
+  days: number
+): ApplicationActivityPoint[] => {
+  const today = new Date();
+  const pointsByDay = new Map(activityCalendar.map(point => [point.day, point] as const));
   const points: ApplicationActivityPoint[] = [];
 
   for (let offset = days - 1; offset >= 0; offset -= 1) {
@@ -488,6 +577,8 @@ const buildRecentActivity = (rows: ActivityRow[], days: number): ApplicationActi
         day,
         totalCount: 0,
         appliedCount: 0,
+        interviewedCount: 0,
+        employedCount: 0,
         reviewRequiredCount: 0,
         failedCount: 0,
         skippedCount: 0
@@ -700,6 +791,56 @@ export const updateTrackedApplicationJobDetails = (
   return getTrackedApplicationById(applicationId);
 };
 
+export const updateTrackedApplicationProgress = (
+  applicationId: string,
+  stage: ApplicationProgressStage
+): TrackedJobApplication | null => {
+  const existingApplication = getTrackedApplicationById(applicationId);
+
+  if (!existingApplication) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const nextJobDetails = normalizeJobDetails({
+    ...existingApplication.jobDetails,
+    applicationSubmittedDate: getSubmittedDateForProgressUpdate(existingApplication, now),
+    interviewedForJob:
+      stage === 'interviewed' ? true : existingApplication.jobDetails.interviewedForJob
+  });
+  const nextStatus: TrackedApplicationStatus = 'applied';
+  const nextMessage = getManualProgressMessage(stage, existingApplication);
+
+  const hasChanges =
+    existingApplication.status !== nextStatus ||
+    existingApplication.message !== nextMessage ||
+    JSON.stringify(existingApplication.jobDetails) !== JSON.stringify(nextJobDetails);
+
+  if (!hasChanges) {
+    return existingApplication;
+  }
+
+  const result = getDatabase()
+    .prepare(
+      `
+        UPDATE job_applications
+        SET
+          status = ?,
+          message = ?,
+          job_details_json = ?,
+          updated_at = ?
+        WHERE id = ?
+      `
+    )
+    .run(nextStatus, nextMessage, JSON.stringify(nextJobDetails), now, applicationId);
+
+  if (result.changes === 0) {
+    return null;
+  }
+
+  return getTrackedApplicationById(applicationId);
+};
+
 export const enrichTrackedApplicationFromListing = async (
   applicationId: string
 ): Promise<TrackedJobApplication | null> => {
@@ -879,6 +1020,45 @@ export const listTrackedApplications = (limit = DEFAULT_HISTORY_LIMIT): TrackedJ
   return rows.map(mapTrackedApplicationRow);
 };
 
+const listAllTrackedApplications = (): TrackedJobApplication[] => {
+  const rows = getDatabase()
+    .prepare(
+      `
+        SELECT
+          id,
+          job_id,
+          job_url,
+          title,
+          company,
+          description,
+          location,
+          salary,
+          date_posted,
+          match_score,
+          job_details_json,
+          resume_id,
+          resume_file_name,
+          cover_letter_text,
+          cover_letter_used,
+          trigger_source,
+          status,
+          message,
+          logs_json,
+          artifacts_json,
+          final_url,
+          steps,
+          created_at,
+          updated_at,
+          completed_at
+        FROM job_applications
+        ORDER BY created_at DESC, updated_at DESC
+      `
+    )
+    .all<TrackedApplicationRow>();
+
+  return rows.map(mapTrackedApplicationRow);
+};
+
 export const getTrackedApplicationsByJobUrls = (jobUrls: string[]): TrackedJobApplication[] => {
   const uniqueNormalizedUrls = Array.from(
     new Set(
@@ -900,6 +1080,8 @@ export const getApplicationTrackingSummary = (
   const safeDays = clampPositiveInteger(days, DEFAULT_ACTIVITY_DAYS, 90);
   const safeRecentLimit = clampPositiveInteger(recentLimit, DEFAULT_RECENT_APPLICATION_LIMIT, 50);
   const recentApplications = listTrackedApplications(safeRecentLimit);
+  const allApplications = listAllTrackedApplications();
+  const activityCalendar = buildActivityCalendar(allApplications);
   const statusCounts = createEmptyStatusCounts();
 
   getDatabase()
@@ -925,34 +1107,28 @@ export const getApplicationTrackingSummary = (
     completedApplications > 0
       ? Math.round((successfulApplications / completedApplications) * 1000) / 10
       : 0;
-
-  const since = new Date();
-  since.setUTCDate(since.getUTCDate() - (safeDays - 1));
-  const recentActivityRows = getDatabase()
-    .prepare(
-      `
-        SELECT
-          substr(created_at, 1, 10) as day,
-          COUNT(*) as total_count,
-          SUM(CASE WHEN status = 'applied' THEN 1 ELSE 0 END) as applied_count,
-          SUM(CASE WHEN status = 'review_required' THEN 1 ELSE 0 END) as review_required_count,
-          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_count,
-          SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) as skipped_count
-        FROM job_applications
-        WHERE created_at >= ?
-        GROUP BY substr(created_at, 1, 10)
-        ORDER BY day ASC
-      `
-    )
-    .all<ActivityRow>(since.toISOString());
+  const appliedCount = allApplications.filter(
+    application =>
+      application.status === 'applied' || Boolean(application.jobDetails.applicationSubmittedDate)
+  ).length;
+  const interviewedCount = allApplications.filter(application => application.jobDetails.interviewedForJob).length;
+  const employedCount = allApplications.filter(application => application.jobDetails.employedForJob).length;
+  const activityYears = Array.from(
+    new Set(activityCalendar.map(point => Number(point.day.slice(0, 4))).filter(Number.isFinite))
+  ).sort((left, right) => right - left);
 
   return {
     totalApplications,
     completedApplications,
     successfulApplications,
     successRate,
+    appliedCount,
+    interviewedCount,
+    employedCount,
     statusCounts,
-    recentActivity: buildRecentActivity(recentActivityRows, safeDays),
+    recentActivity: buildRecentActivity(activityCalendar, safeDays),
+    activityCalendar,
+    activityYears,
     recentApplications
   };
 };

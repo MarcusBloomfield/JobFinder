@@ -153,10 +153,14 @@ JobFinder/
   suburbOrPostcode: string;
   applicationMethod: '' | 'seek' | 'company_website' | 'linkedin' | 'indeed' | 'email' | 'recruiter' | 'referral' | 'other';
   applicationSubmittedDate: string;  // YYYY-MM-DD
+  interviewedForJob: boolean;
+  employedForJob: boolean;
 }
 ```
 
 > **Tracked applications** now persist a `jobDetails` payload in SQLite and expose it through the Progress modal for manual completion and editing. When core fields are missing, the modal can also rehydrate company, location, and description from the original job listing.
+
+> **Progress stats** now focus on funnel counts the user can maintain from the Progress page: jobs applied for, interviewed for, and employed for.
 
 > **Note:** Models are duplicated across `src/models/` and `backend/src/models/`. Keep them in sync when changing the shape.
 

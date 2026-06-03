@@ -4,6 +4,7 @@ import { JobDetails } from '../models/JobDetails';
 import { Resume } from '../models/Resume';
 import { ApplicationProfile } from '../models/ApplicationProfile';
 import {
+  ApplicationProgressStage,
   ApplicationTrackingSummary,
   ApplicationTriggerSource,
   TrackedJobApplication
@@ -121,6 +122,21 @@ export const updateApplicationJobDetails = async (
   }
 
   throw new Error('Invalid response format from job details API');
+};
+
+export const updateTrackedApplicationProgressStage = async (
+  applicationId: string,
+  stage: ApplicationProgressStage
+): Promise<TrackedJobApplication> => {
+  const response = await axios.patch(`${API_URL}/applications/${applicationId}/progress`, {
+    stage
+  });
+
+  if (response.data && response.data.data) {
+    return response.data.data as TrackedJobApplication;
+  }
+
+  throw new Error('Invalid response format from application progress API');
 };
 
 export const enrichTrackedApplicationFromListing = async (

@@ -401,62 +401,132 @@ button:disabled {
   color: var(--gray-color);
 }
 
-.application-activity-chart {
-  display: grid;
-  grid-template-columns: repeat(14, minmax(0, 1fr));
-  gap: 0.5rem;
-  align-items: end;
-  min-height: 180px;
-}
-
-.application-activity-bar-group {
+.application-activity-tracker {
   display: flex;
   flex-direction: column;
+  gap: 0.75rem;
+}
+
+.application-activity-year-select {
+  min-width: 110px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #d5dce0;
+  border-radius: 8px;
+  background-color: white;
+  color: var(--dark-color);
+  font: inherit;
+}
+
+.application-activity-calendar-scroll {
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.application-activity-month-labels {
+  display: grid;
+  grid-template-columns: 56px repeat(53, 14px);
+  gap: 0;
+  min-width: max-content;
+  margin-bottom: 0.45rem;
+}
+
+.application-activity-month-labels span {
+  min-height: 1rem;
+  font-size: 0.7rem;
+  color: var(--gray-color);
+}
+
+.application-activity-calendar-body {
+  display: grid;
+  grid-template-columns: 56px max-content;
+  gap: 0.65rem;
+  min-width: max-content;
+}
+
+.application-activity-weekday-labels {
+  display: grid;
+  grid-template-rows: repeat(7, 14px);
+  gap: 0.5rem;
+}
+
+.application-activity-weekday-labels span {
+  font-size: 0.72rem;
+  color: #5b6773;
+}
+
+.application-activity-calendar-grid {
+  display: flex;
+  gap: 0;
+}
+
+.application-activity-week-column {
+  display: grid;
+  grid-template-rows: repeat(7, 14px);
+  gap: 0;
+}
+
+.application-activity-cell {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgba(27, 31, 36, 0.08);
+  background-color: #ebedf0;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.application-activity-cell:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(31, 45, 58, 0.12);
+}
+
+.application-activity-cell.none {
+  background-color: #ebedf0;
+}
+
+.application-activity-cell.applied {
+  background-color: #3b82f6;
+}
+
+.application-activity-cell.interviewed {
+  background-color: #22c55e;
+}
+
+.application-activity-cell.employed {
+  background-color: #f59e0b;
+}
+
+.application-activity-cell.outside-year {
+  opacity: 0.18;
+}
+
+.application-activity-legend {
+  display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 0.4rem;
-  min-height: 180px;
-}
-
-.application-activity-bar {
-  width: 100%;
-  min-height: 8px;
-  border-radius: 999px 999px 4px 4px;
-  background: linear-gradient(180deg, #5dade2 0%, #2471a3 100%);
-}
-
-.application-activity-bar-group span {
+  flex-wrap: wrap;
   font-size: 0.72rem;
   color: var(--gray-color);
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
+  margin-top: 0.75rem;
 }
 
-.application-recent-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+.application-activity-legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid rgba(27, 31, 36, 0.08);
 }
 
-.application-status-breakdown {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 0.75rem;
+.application-activity-legend-swatch.applied {
+  background-color: #3b82f6;
 }
 
-.application-status-breakdown-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-  padding: 0.9rem;
-  border-radius: 8px;
-  border: 1px solid #e6edf2;
-  background-color: white;
+.application-activity-legend-swatch.interviewed {
+  background-color: #22c55e;
 }
 
-.application-status-breakdown-item strong {
-  font-size: 1.4rem;
-  color: var(--dark-color);
+.application-activity-legend-swatch.employed {
+  background-color: #f59e0b;
 }
 
 .application-recent-item {
@@ -550,6 +620,29 @@ button:disabled {
   color: var(--gray-color);
 }
 
+.application-history-error {
+  margin-bottom: 0.9rem;
+}
+
+.application-history-stage-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.application-history-stage-pill.interviewed {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+.application-history-stage-pill.employed {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
 .application-history-actions {
   display: flex;
   gap: 0.75rem;
@@ -557,7 +650,8 @@ button:disabled {
 }
 
 .application-history-actions a,
-.application-history-open-button {
+.application-history-open-button,
+.application-history-stage-button {
   display: inline-flex;
   align-items: center;
   padding: 0.5rem 0.75rem;
@@ -570,13 +664,33 @@ button:disabled {
 }
 
 .application-history-actions a:hover,
-.application-history-open-button:hover:not(:disabled) {
+.application-history-open-button:hover:not(:disabled),
+.application-history-stage-button:hover:not(:disabled) {
   background-color: #ddeef9;
 }
 
-.application-history-open-button {
+.application-history-open-button,
+.application-history-stage-button {
   border: none;
   cursor: pointer;
+}
+
+.application-history-stage-button {
+  background-color: #e8f6f3;
+  color: #0f766e;
+}
+
+.application-history-stage-button:hover:not(:disabled) {
+  background-color: #d6f1ec;
+}
+
+.application-history-stage-button.interviewed {
+  background-color: #ecfdf5;
+  color: #15803d;
+}
+
+.application-history-stage-button.interviewed:hover:not(:disabled) {
+  background-color: #dcfce7;
 }
 
 .application-detail-overlay {
@@ -1527,13 +1641,8 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .application-activity-chart {
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-    row-gap: 1rem;
-  }
-
-  .application-activity-bar-group:nth-child(n + 8) {
-    display: none;
+  .application-progress-subheader {
+    align-items: flex-start;
   }
 
   .application-history-main {

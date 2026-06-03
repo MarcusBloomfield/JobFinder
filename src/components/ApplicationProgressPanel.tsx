@@ -7,6 +7,7 @@ import {
   JobDetails
 } from '../models/JobDetails';
 import {
+  ApplicationProgressStage,
   ApplicationTrackingSummary,
   TrackedApplicationStatus,
   TrackedJobApplication
@@ -19,6 +20,10 @@ interface ApplicationProgressPanelProps {
   isLoading: boolean;
   onRefresh: () => Promise<void>;
   onUpdateJobDetails: (applicationId: string, jobDetails: JobDetails) => Promise<void>;
+  onUpdateProgressStage: (
+    applicationId: string,
+    stage: ApplicationProgressStage
+  ) => Promise<void>;
   onEnrichApplication: (applicationId: string) => Promise<void>;
 }
 
@@ -88,6 +93,78 @@ const getSearchSnapshot = (jobs: Job[]) => ({
   ).length
 });
 
+const getBooleanSelectValue = (value: boolean): 'yes' | 'no' => (value ? 'yes' : 'no');
+
+const canMarkApplicationAsApplied = (application: TrackedJobApplication): boolean =>
+  application.status !== 'applied' || !application.jobDetails.applicationSubmittedDate;
+
+const canMarkApplicationAsInterviewed = (application: TrackedJobApplication): boolean =>
+  !application.jobDetails.interviewedForJob;
+
+type ActivityStage = 'applied' | 'interviewed' | 'employed';
+type CalendarStage = ActivityStage | 'none';
+
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const getCalendarStage = (
+  point?: ApplicationTrackingSummary['activityCalendar'][number]
+): CalendarStage => {
+  if (!point) {
+    return 'none';
+  }
+
+  if (point.employedCount > 0) {
+    return 'employed';
+  }
+
+  if (point.interviewedCount > 0) {
+    return 'interviewed';
+  }
+
+  if (point.appliedCount > 0) {
+    return 'applied';
+  }
+
+  return 'none';
+};
+
+const getStartOfWeek = (date: Date): Date => {
+  const nextDate = new Date(date);
+  nextDate.setUTCDate(nextDate.getUTCDate() - nextDate.getUTCDay());
+  return nextDate;
+};
+
+const getEndOfWeek = (date: Date): Date => {
+  const nextDate = new Date(date);
+  nextDate.setUTCDate(nextDate.getUTCDate() + (6 - nextDate.getUTCDay()));
+  return nextDate;
+};
+
+const toDateKey = (date: Date): string => date.toISOString().slice(0, 10);
+
+const buildCalendarWeeks = (year: number): Date[][] => {
+  const firstDay = new Date(Date.UTC(year, 0, 1));
+  const lastDay = new Date(Date.UTC(year, 11, 31));
+  const start = getStartOfWeek(firstDay);
+  const end = getEndOfWeek(lastDay);
+  const weeks: Date[][] = [];
+  let cursor = new Date(start);
+
+  while (cursor <= end) {
+    const week: Date[] = [];
+
+    for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
+      week.push(new Date(cursor));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    weeks.push(week);
+  }
+
+  return weeks;
+};
+
 const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
   summary,
   history,
@@ -95,28 +172,69 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
   isLoading,
   onRefresh,
   onUpdateJobDetails,
+  onUpdateProgressStage,
   onEnrichApplication
 }) => {
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
+  const [selectedActivityYear, setSelectedActivityYear] = useState<number | null>(null);
   const [jobDetailsDraft, setJobDetailsDraft] = useState<JobDetails>({ ...DEFAULT_JOB_DETAILS });
   const [jobDetailsError, setJobDetailsError] = useState<string | null>(null);
   const [isSavingJobDetails, setIsSavingJobDetails] = useState<boolean>(false);
+  const [pendingProgressUpdate, setPendingProgressUpdate] = useState<{
+    applicationId: string;
+    stage: ApplicationProgressStage;
+  } | null>(null);
+  const [progressUpdateError, setProgressUpdateError] = useState<string | null>(null);
   const [isEnrichingApplication, setIsEnrichingApplication] = useState<boolean>(false);
   const [applicationEnrichmentError, setApplicationEnrichmentError] = useState<string | null>(null);
   const [enrichmentRequestedForApplicationId, setEnrichmentRequestedForApplicationId] =
     useState<string | null>(null);
-  const maxDailyCount = Math.max(1, ...(summary?.recentActivity.map(point => point.totalCount) || [0]));
   const searchSnapshot = getSearchSnapshot(jobs);
-  const activePipelineCount = (summary?.statusCounts.applying || 0) + (summary?.statusCounts.review_required || 0);
   const selectedApplication = useMemo(
     () => history.find(application => application.id === selectedApplicationId) || null,
     [history, selectedApplicationId]
   );
+  const activityYears = summary?.activityYears || [];
+  const activeActivityYear = selectedActivityYear ?? activityYears[0] ?? new Date().getUTCFullYear();
+  const activityPointsByDay = useMemo(
+    () =>
+      new Map(
+        (summary?.activityCalendar || [])
+          .filter(point => Number(point.day.slice(0, 4)) === activeActivityYear)
+          .map(point => [point.day, point] as const)
+      ),
+    [summary, activeActivityYear]
+  );
+  const activityWeeks = useMemo(() => buildCalendarWeeks(activeActivityYear), [activeActivityYear]);
+  const activityMonthLabels = useMemo(
+    () =>
+      activityWeeks.map(week => {
+        const firstInYear = week.find(day => day.getUTCFullYear() === activeActivityYear);
+        if (!firstInYear) {
+          return '';
+        }
+
+        return firstInYear.getUTCDate() <= 7 ? MONTH_LABELS[firstInYear.getUTCMonth()] : '';
+      }),
+    [activityWeeks, activeActivityYear]
+  );
+
+  useEffect(() => {
+    if (activityYears.length === 0) {
+      setSelectedActivityYear(null);
+      return;
+    }
+
+    setSelectedActivityYear(currentYear =>
+      currentYear && activityYears.includes(currentYear) ? currentYear : activityYears[0]
+    );
+  }, [activityYears]);
 
   useEffect(() => {
     if (!selectedApplication) {
       setJobDetailsDraft({ ...DEFAULT_JOB_DETAILS });
       setJobDetailsError(null);
+      setProgressUpdateError(null);
       setApplicationEnrichmentError(null);
       setEnrichmentRequestedForApplicationId(null);
       return;
@@ -125,6 +243,10 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
     setJobDetailsDraft(selectedApplication.jobDetails);
     setJobDetailsError(null);
   }, [selectedApplication]);
+
+  useEffect(() => {
+    setProgressUpdateError(null);
+  }, [history]);
 
   useEffect(() => {
     if (!selectedApplication) {
@@ -187,6 +309,30 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
     }
   };
 
+  const handleProgressUpdate = async (
+    applicationId: string,
+    stage: ApplicationProgressStage
+  ): Promise<void> => {
+    setProgressUpdateError(null);
+    setPendingProgressUpdate({ applicationId, stage });
+
+    try {
+      await onUpdateProgressStage(applicationId, stage);
+    } catch (error) {
+      setProgressUpdateError(
+        error instanceof Error ? error.message : 'Failed to update application progress'
+      );
+    } finally {
+      setPendingProgressUpdate(currentUpdate =>
+        currentUpdate &&
+        currentUpdate.applicationId === applicationId &&
+        currentUpdate.stage === stage
+          ? null
+          : currentUpdate
+      );
+    }
+  };
+
   return (
     <>
       <section className="application-progress-page">
@@ -246,76 +392,107 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
             ) : (
               <div className="application-progress-stats">
                 <article className="application-progress-stat-card">
+                  <span className="application-progress-stat-label">Jobs Applied For</span>
+                  <strong>{summary.appliedCount}</strong>
+                </article>
+                <article className="application-progress-stat-card">
+                  <span className="application-progress-stat-label">Interviewed For</span>
+                  <strong>{summary.interviewedCount}</strong>
+                </article>
+                <article className="application-progress-stat-card">
+                  <span className="application-progress-stat-label">Employed For</span>
+                  <strong>{summary.employedCount}</strong>
+                </article>
+                <article className="application-progress-stat-card">
                   <span className="application-progress-stat-label">Tracked Runs</span>
                   <strong>{summary.totalApplications}</strong>
-                </article>
-                <article className="application-progress-stat-card">
-                  <span className="application-progress-stat-label">Applied</span>
-                  <strong>{summary.statusCounts.applied}</strong>
-                </article>
-                <article className="application-progress-stat-card">
-                  <span className="application-progress-stat-label">Active Pipeline</span>
-                  <strong>{activePipelineCount}</strong>
-                </article>
-                <article className="application-progress-stat-card">
-                  <span className="application-progress-stat-label">Success Rate</span>
-                  <strong>{summary.successRate}%</strong>
                 </article>
               </div>
             )}
           </section>
 
           <section className="application-progress-section-card application-progress-wide-card">
-            <div className="application-progress-grid">
-              <div className="application-activity-card">
-                <div className="application-progress-subheader">
-                  <h3>Activity Over 14 Days</h3>
-                  <span>{summary ? `${summary.completedApplications} completed runs` : 'No activity yet'}</span>
-                </div>
-                {!summary || summary.recentActivity.length === 0 ? (
-                  <div className="application-progress-empty">
-                    <p>No recent tracked activity.</p>
-                  </div>
+            <div className="application-activity-card">
+              <div className="application-progress-subheader">
+                <h3>Yearly Activity</h3>
+                {activityYears.length > 0 ? (
+                  <select
+                    className="application-activity-year-select"
+                    value={activeActivityYear}
+                    onChange={event => setSelectedActivityYear(Number(event.target.value))}
+                  >
+                    {activityYears.map(year => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))}
+                  </select>
                 ) : (
-                  <div className="application-activity-chart" aria-label="Application activity chart">
-                    {summary.recentActivity.map(point => (
-                      <div key={point.day} className="application-activity-bar-group">
-                        <div
-                          className="application-activity-bar"
-                          style={{ height: `${Math.max(10, (point.totalCount / maxDailyCount) * 100)}%` }}
-                          title={`${point.totalCount} tracked on ${point.day}`}
-                        />
-                        <span>{formatDateLabel(point.day)}</span>
+                  <span>No activity yet</span>
+                )}
+              </div>
+              {!summary || activityYears.length === 0 ? (
+                <div className="application-progress-empty">
+                  <p>No tracked activity is available yet.</p>
+                </div>
+              ) : (
+                <div className="application-activity-tracker" aria-label="Application activity tracker">
+                  <div className="application-activity-calendar-scroll">
+                    <div className="application-activity-month-labels" aria-hidden="true">
+                      <span />
+                      {activityMonthLabels.map((label, index) => (
+                        <span key={`${activeActivityYear}-month-${index}`}>{label}</span>
+                      ))}
+                    </div>
+                    <div className="application-activity-calendar-body">
+                      <div className="application-activity-weekday-labels" aria-hidden="true">
+                        {WEEKDAY_LABELS.map(label => (
+                          <span key={label}>{label}</span>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                      <div className="application-activity-calendar-grid">
+                        {activityWeeks.map((week, weekIndex) => (
+                          <div
+                            key={`${activeActivityYear}-week-${weekIndex}`}
+                            className="application-activity-week-column"
+                          >
+                            {week.map(day => {
+                              const dayKey = toDateKey(day);
+                              const point = activityPointsByDay.get(dayKey);
+                              const stage = getCalendarStage(point);
+                              const isOutsideYear = day.getUTCFullYear() !== activeActivityYear;
+                              const tooltipParts = [
+                                formatDateLabel(dayKey),
+                                `Employed: ${point?.employedCount || 0}`,
+                                `Interviewed: ${point?.interviewedCount || 0}`,
+                                `Applied: ${point?.appliedCount || 0}`
+                              ];
 
-              <div className="application-recent-card">
-                <div className="application-progress-subheader">
-                  <h3>Status Breakdown</h3>
-                  <span>Stored outcomes across all tracked runs</span>
+                              return (
+                                <div
+                                  key={dayKey}
+                                  className={`application-activity-cell ${stage}${isOutsideYear ? ' outside-year' : ''}`}
+                                  title={tooltipParts.join(' | ')}
+                                  aria-label={tooltipParts.join(', ')}
+                                />
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="application-activity-legend" aria-hidden="true">
+                      <span>Priority</span>
+                      {(['employed', 'interviewed', 'applied'] as ActivityStage[]).map(stage => (
+                        <React.Fragment key={stage}>
+                          <span className={`application-activity-legend-swatch ${stage}`} />
+                          <span>{stage.charAt(0).toUpperCase() + stage.slice(1)}</span>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-                {!summary ? (
-                  <div className="application-progress-empty">
-                    <p>No status breakdown is available yet.</p>
-                  </div>
-                ) : (
-                  <div className="application-status-breakdown">
-                    {(
-                      Object.entries(summary.statusCounts) as Array<[TrackedApplicationStatus, number]>
-                    ).map(([status, count]) => (
-                      <article key={status} className="application-status-breakdown-item">
-                        <span className={`application-status ${status.replace('_', '-')}`}>
-                          {STATUS_LABELS[status]}
-                        </span>
-                        <strong>{count}</strong>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </div>
+              )}
             </div>
           </section>
 
@@ -329,48 +506,108 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
                 <p>Start applying to jobs and your recent run history will appear here.</p>
               </div>
             ) : (
-              <div className="application-history-list">
-                {history.map(application => (
-                  <article key={application.id} className="application-history-item">
-                    <div className="application-history-main">
-                      <div className="application-history-copy">
-                        <div className="application-history-title-row">
-                          <strong>{application.title}</strong>
-                          <span className={`application-status ${application.status.replace('_', '-')}`}>
-                            {STATUS_LABELS[application.status]}
-                          </span>
+              <>
+                {progressUpdateError && (
+                  <p className="application-detail-error application-history-error">
+                    {progressUpdateError}
+                  </p>
+                )}
+                <div className="application-history-list">
+                  {history.map(application => {
+                    const isMarkingApplied =
+                      pendingProgressUpdate?.applicationId === application.id &&
+                      pendingProgressUpdate.stage === 'applied';
+                    const isMarkingInterviewed =
+                      pendingProgressUpdate?.applicationId === application.id &&
+                      pendingProgressUpdate.stage === 'interviewed';
+
+                    return (
+                      <article key={application.id} className="application-history-item">
+                        <div className="application-history-main">
+                          <div className="application-history-copy">
+                            <div className="application-history-title-row">
+                              <strong>{application.title}</strong>
+                              <span
+                                className={`application-status ${application.status.replace('_', '-')}`}
+                              >
+                                {STATUS_LABELS[application.status]}
+                              </span>
+                              {application.jobDetails.interviewedForJob && (
+                                <span className="application-history-stage-pill interviewed">
+                                  Interviewed
+                                </span>
+                              )}
+                              {application.jobDetails.employedForJob && (
+                                <span className="application-history-stage-pill employed">
+                                  Employed
+                                </span>
+                              )}
+                            </div>
+                            <span className="application-history-company">{application.company}</span>
+                            <p className="application-history-message">{application.message}</p>
+                          </div>
+                          <div className="application-history-meta">
+                            <span>Resume: {application.resumeFileName}</span>
+                            <span>
+                              Match at apply:{' '}
+                              {typeof application.matchScore === 'number'
+                                ? `${application.matchScore}%`
+                                : 'Unavailable'}
+                            </span>
+                            <span>
+                              Source:{' '}
+                              {application.triggerSource === 'bulk'
+                                ? 'Bulk auto-apply'
+                                : 'Manual apply'}
+                            </span>
+                            <time dateTime={getApplicationTimestampValue(application)}>
+                              {formatTimestamp(getApplicationTimestampValue(application))}
+                            </time>
+                          </div>
                         </div>
-                        <span className="application-history-company">{application.company}</span>
-                        <p className="application-history-message">{application.message}</p>
-                      </div>
-                      <div className="application-history-meta">
-                        <span>Resume: {application.resumeFileName}</span>
-                        <span>Match at apply: {typeof application.matchScore === 'number' ? `${application.matchScore}%` : 'Unavailable'}</span>
-                        <span>Source: {application.triggerSource === 'bulk' ? 'Bulk auto-apply' : 'Manual apply'}</span>
-                        <time dateTime={getApplicationTimestampValue(application)}>
-                          {formatTimestamp(getApplicationTimestampValue(application))}
-                        </time>
-                      </div>
-                    </div>
-                    <div className="application-history-actions">
-                      <button
-                        className="application-history-open-button"
-                        onClick={() => setSelectedApplicationId(application.id)}
-                      >
-                        View Details
-                      </button>
-                      <a href={application.jobUrl} target="_blank" rel="noreferrer">
-                        Job Listing
-                      </a>
-                      {application.finalUrl && application.finalUrl !== application.jobUrl && (
-                        <a href={application.finalUrl} target="_blank" rel="noreferrer">
-                          Final Page
-                        </a>
-                      )}
-                    </div>
-                  </article>
-                ))}
-              </div>
+                        <div className="application-history-actions">
+                          {canMarkApplicationAsApplied(application) && (
+                            <button
+                              className="application-history-stage-button"
+                              disabled={Boolean(pendingProgressUpdate)}
+                              onClick={() => void handleProgressUpdate(application.id, 'applied')}
+                            >
+                              {isMarkingApplied ? 'Saving Applied...' : 'Mark Applied'}
+                            </button>
+                          )}
+                          {canMarkApplicationAsInterviewed(application) && (
+                            <button
+                              className="application-history-stage-button interviewed"
+                              disabled={Boolean(pendingProgressUpdate)}
+                              onClick={() =>
+                                void handleProgressUpdate(application.id, 'interviewed')
+                              }
+                            >
+                              {isMarkingInterviewed
+                                ? 'Saving Interviewed...'
+                                : 'Mark Interviewed'}
+                            </button>
+                          )}
+                          <button
+                            className="application-history-open-button"
+                            onClick={() => setSelectedApplicationId(application.id)}
+                          >
+                            View Details
+                          </button>
+                          <a href={application.jobUrl} target="_blank" rel="noreferrer">
+                            Job Listing
+                          </a>
+                          {application.finalUrl && application.finalUrl !== application.jobUrl && (
+                            <a href={application.finalUrl} target="_blank" rel="noreferrer">
+                              Final Page
+                            </a>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </section>
         </div>
@@ -566,6 +803,34 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
                         updateJobDetailsField('applicationSubmittedDate', event.target.value)
                       }
                     />
+                  </label>
+
+                  <label className="application-profile-field">
+                    <span>Interviewed for this job?</span>
+                    <select
+                      disabled={isSavingJobDetails || isEnrichingApplication}
+                      value={getBooleanSelectValue(jobDetailsDraft.interviewedForJob)}
+                      onChange={event =>
+                        updateJobDetailsField('interviewedForJob', event.target.value === 'yes')
+                      }
+                    >
+                      <option value="no">No</option>
+                      <option value="yes">Yes</option>
+                    </select>
+                  </label>
+
+                  <label className="application-profile-field">
+                    <span>Employed for this job?</span>
+                    <select
+                      disabled={isSavingJobDetails || isEnrichingApplication}
+                      value={getBooleanSelectValue(jobDetailsDraft.employedForJob)}
+                      onChange={event =>
+                        updateJobDetailsField('employedForJob', event.target.value === 'yes')
+                      }
+                    >
+                      <option value="no">No</option>
+                      <option value="yes">Yes</option>
+                    </select>
                   </label>
                 </div>
 

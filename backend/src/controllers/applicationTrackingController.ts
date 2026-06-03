@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { JobDetails, normalizeJobDetails } from '../models/JobDetails';
+import { ApplicationProgressStage } from '../services/applicationTrackingService';
 import * as applicationTrackingService from '../services/applicationTrackingService';
 
 const parsePositiveInteger = (value: unknown, fallback: number): number => {
@@ -42,6 +43,8 @@ const getMissingRequiredJobDetailsLabels = (jobDetails: JobDetails): string[] =>
 
   return missingFields;
 };
+
+const APPLICATION_PROGRESS_STAGES: ApplicationProgressStage[] = ['applied', 'interviewed'];
 
 export const getApplicationHistory = (req: Request, res: Response) => {
   try {
@@ -153,6 +156,53 @@ export const updateTrackedApplicationJobDetails = (req: Request, res: Response) 
     });
   } catch (error) {
     console.error('Error in updateTrackedApplicationJobDetails controller:', error);
+    res.status(500).json({
+      error: true,
+      message: error instanceof Error ? error.message : 'An unknown error occurred'
+    });
+  }
+};
+
+export const updateTrackedApplicationProgress = (req: Request, res: Response) => {
+  try {
+    const { applicationId } = req.params as { applicationId?: string };
+    const { stage } = req.body as { stage?: unknown };
+
+    if (!applicationId || typeof applicationId !== 'string') {
+      return res.status(400).json({
+        error: true,
+        message: 'Missing or invalid applicationId route parameter.'
+      });
+    }
+
+    if (
+      typeof stage !== 'string' ||
+      !APPLICATION_PROGRESS_STAGES.includes(stage as ApplicationProgressStage)
+    ) {
+      return res.status(400).json({
+        error: true,
+        message: 'Invalid request body. Expected stage to be "applied" or "interviewed".'
+      });
+    }
+
+    const data = applicationTrackingService.updateTrackedApplicationProgress(
+      applicationId,
+      stage as ApplicationProgressStage
+    );
+
+    if (!data) {
+      return res.status(404).json({
+        error: true,
+        message: 'Tracked application not found.'
+      });
+    }
+
+    res.status(200).json({
+      error: false,
+      data
+    });
+  } catch (error) {
+    console.error('Error in updateTrackedApplicationProgress controller:', error);
     res.status(500).json({
       error: true,
       message: error instanceof Error ? error.message : 'An unknown error occurred'
