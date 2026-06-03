@@ -32,9 +32,9 @@ const YEAR_PATTERN = /\b(?:19|20)\d{2}\b/g;
 const FORCE_CONTINUE_REVIEW_PATTERN =
   /year|experience|prefill|framework|language|selection|cover letter|resume|question|answer|skill|stack|technology/i;
 const COMMON_APPLICATION_PROFILE_REVIEW_PATTERN =
-  /work rights|working rights|right to work|authori[sz]ation|sponsorship|driver|licen[cs]e|salary|base salary|compensation|remuneration/i;
+  /work rights|working rights|right to work|authori[sz]ation|sponsorship|driver|licen[cs]e|salary|base salary|compensation|remuneration|notice|availability|transport|vehicle|car access|email|phone|mobile|name|linkedin|github|website|portfolio|location|address|suburb|postcode|about you|summary|profile|skill|technology|tool|employment|work history|previous job|education|qualification|degree|certificate/i;
 const FORCE_CONTINUE_INSTRUCTION =
-  'Do not stop for routine employer questions, imperfect prefilled answers, missing exact years, or common screening questions when the applicationProfile provides an explicit answer. Continue by using conservative resume-grounded estimates, applicationProfile answers for work rights, licence, salary, and recurring screening questions, correcting existing selections and text, replacing weak prefilled cover-letter content, and uploading or replacing the resume if the page expects it.';
+  'Do not stop for routine employer questions, imperfect prefilled answers, missing exact years, or common screening questions when the applicationProfile provides an explicit answer. Continue by using conservative resume-grounded estimates, applicationProfile answers for contact details, location, links, availability, notice period, profile summary, manual skills, previous jobs, education, work rights, licence, car access, salary, and recurring screening questions, correcting existing selections and text, replacing weak prefilled cover-letter content, and uploading or replacing the resume if the page expects it.';
 const HUMAN_TYPING_DELAY_MS = 35;
 const SEQUENTIAL_TYPE_MAX_CHARS = 220;
 const REDACTED_PASSWORD_VALUE = '__redacted_password_present__';
@@ -306,6 +306,90 @@ const normalizeOptionalText = (value: string | undefined): string | undefined =>
   return normalized ? normalized : undefined;
 };
 
+const getPreferredProfileText = (
+  profileValue: string | undefined,
+  fallbackValue: string | undefined
+): string | undefined => normalizeOptionalText(profileValue) || normalizeOptionalText(fallbackValue);
+
+const getProfileFullName = (
+  candidateProfile: CandidateProfile,
+  applicationProfile?: ApplicationProfile
+): string | undefined => getPreferredProfileText(applicationProfile?.fullName, candidateProfile.fullName);
+
+const getProfileFirstName = (
+  candidateProfile: CandidateProfile,
+  applicationProfile?: ApplicationProfile
+): string | undefined => {
+  const explicitFullName = normalizeOptionalText(applicationProfile?.fullName);
+  if (explicitFullName) {
+    return explicitFullName.split(/\s+/)[0];
+  }
+
+  return candidateProfile.firstName;
+};
+
+const getProfileLastName = (
+  candidateProfile: CandidateProfile,
+  applicationProfile?: ApplicationProfile
+): string | undefined => {
+  const explicitFullName = normalizeOptionalText(applicationProfile?.fullName);
+  if (explicitFullName) {
+    const nameParts = explicitFullName.split(/\s+/).filter(Boolean);
+    return nameParts.length > 1 ? nameParts[nameParts.length - 1] : undefined;
+  }
+
+  return candidateProfile.lastName;
+};
+
+const getProfileEmail = (
+  candidateProfile: CandidateProfile,
+  applicationProfile?: ApplicationProfile
+): string | undefined => getPreferredProfileText(applicationProfile?.email, candidateProfile.email);
+
+const getProfilePhone = (
+  candidateProfile: CandidateProfile,
+  applicationProfile?: ApplicationProfile
+): string | undefined => getPreferredProfileText(applicationProfile?.phone, candidateProfile.phone);
+
+const getProfileLinkedin = (
+  candidateProfile: CandidateProfile,
+  applicationProfile?: ApplicationProfile
+): string | undefined => getPreferredProfileText(applicationProfile?.linkedinUrl, candidateProfile.linkedin);
+
+const getProfileGithub = (
+  candidateProfile: CandidateProfile,
+  applicationProfile?: ApplicationProfile
+): string | undefined => getPreferredProfileText(applicationProfile?.githubUrl, candidateProfile.github);
+
+const getProfileWebsite = (
+  candidateProfile: CandidateProfile,
+  applicationProfile?: ApplicationProfile
+): string | undefined =>
+  getPreferredProfileText(applicationProfile?.portfolioUrl, candidateProfile.website) ||
+  getProfileGithub(candidateProfile, applicationProfile) ||
+  getProfileLinkedin(candidateProfile, applicationProfile);
+
+const getProfileLocation = (applicationProfile?: ApplicationProfile): string | undefined =>
+  normalizeOptionalText(applicationProfile?.currentLocation);
+
+const getProfileNoticePeriod = (applicationProfile?: ApplicationProfile): string | undefined =>
+  normalizeOptionalText(applicationProfile?.noticePeriod);
+
+const getProfileAvailability = (applicationProfile?: ApplicationProfile): string | undefined =>
+  normalizeOptionalText(applicationProfile?.availability);
+
+const getProfileProfessionalSummary = (applicationProfile?: ApplicationProfile): string | undefined =>
+  normalizeOptionalText(applicationProfile?.professionalSummary);
+
+const getProfileSkillsDetails = (applicationProfile?: ApplicationProfile): string | undefined =>
+  normalizeOptionalText(applicationProfile?.skillsDetails);
+
+const getProfilePreviousJobsDetails = (applicationProfile?: ApplicationProfile): string | undefined =>
+  normalizeOptionalText(applicationProfile?.previousJobsDetails);
+
+const getProfileEducationDetails = (applicationProfile?: ApplicationProfile): string | undefined =>
+  normalizeOptionalText(applicationProfile?.educationDetails);
+
 const getWorkRightsAnswer = (applicationProfile?: ApplicationProfile): string | undefined => {
   if (!applicationProfile) {
     return undefined;
@@ -346,21 +430,149 @@ const getDriversLicenceAnswer = (applicationProfile?: ApplicationProfile): strin
   }
 };
 
+const getCarAccessAnswer = (applicationProfile?: ApplicationProfile): string | undefined => {
+  if (!applicationProfile) {
+    return undefined;
+  }
+
+  switch (applicationProfile.carAccessStatus) {
+    case 'regular_access':
+      return 'Yes, regular access to a car.';
+    case 'no_regular_access':
+      return 'No regular access to a car.';
+    default:
+      return undefined;
+  }
+};
+
+const hasCarAccessHint = (value: string): boolean => {
+  const normalized = value.toLowerCase();
+
+  return (
+    normalized.includes('regular access to a car') ||
+    normalized.includes('access to a car') ||
+    normalized.includes('have a car') ||
+    normalized.includes('own car') ||
+    normalized.includes('access to a vehicle') ||
+    normalized.includes('regular access to a vehicle') ||
+    normalized.includes('own vehicle') ||
+    normalized.includes('reliable transport') ||
+    normalized.includes('own transport') ||
+    normalized.includes('personal transport')
+  );
+};
+
+const hasSkillsDetailsHint = (value: string): boolean => {
+  const normalized = value.toLowerCase();
+
+  return (
+    normalized.includes('technical skills') ||
+    normalized.includes('key skills') ||
+    normalized.includes('core skills') ||
+    normalized.includes('skills and experience') ||
+    normalized.includes('technologies') ||
+    normalized.includes('technology stack') ||
+    normalized.includes('tech stack') ||
+    normalized.includes('tools') ||
+    normalized.includes('competencies') ||
+    normalized.includes('proficiencies') ||
+    normalized.includes('expertise')
+  );
+};
+
+const hasPreviousJobsHint = (value: string): boolean => {
+  const normalized = value.toLowerCase();
+
+  return (
+    normalized.includes('previous job') ||
+    normalized.includes('previous role') ||
+    normalized.includes('work history') ||
+    normalized.includes('employment history') ||
+    normalized.includes('career history') ||
+    normalized.includes('work experience') ||
+    normalized.includes('employment details') ||
+    normalized.includes('recent employer') ||
+    normalized.includes('current employer')
+  );
+};
+
+const hasEducationHint = (value: string): boolean => {
+  const normalized = value.toLowerCase();
+
+  return (
+    normalized.includes('education') ||
+    normalized.includes('qualification') ||
+    normalized.includes('qualifications') ||
+    normalized.includes('degree') ||
+    normalized.includes('diploma') ||
+    normalized.includes('certificate') ||
+    normalized.includes('certification') ||
+    normalized.includes('course') ||
+    normalized.includes('study') ||
+    normalized.includes('academic')
+  );
+};
+
 const buildApplicationProfileContext = (applicationProfile?: ApplicationProfile) => {
   if (!applicationProfile) {
     return null;
   }
 
   return {
+    fullName: normalizeOptionalText(applicationProfile.fullName) || null,
+    email: normalizeOptionalText(applicationProfile.email) || null,
+    phone: normalizeOptionalText(applicationProfile.phone) || null,
+    currentLocation: getProfileLocation(applicationProfile) || null,
+    linkedinUrl: normalizeOptionalText(applicationProfile.linkedinUrl) || null,
+    portfolioUrl: normalizeOptionalText(applicationProfile.portfolioUrl) || null,
+    githubUrl: normalizeOptionalText(applicationProfile.githubUrl) || null,
+    noticePeriod: getProfileNoticePeriod(applicationProfile) || null,
+    availability: getProfileAvailability(applicationProfile) || null,
+    professionalSummary: getProfileProfessionalSummary(applicationProfile) || null,
+    skillsDetails: getProfileSkillsDetails(applicationProfile) || null,
+    previousJobsDetails: getProfilePreviousJobsDetails(applicationProfile) || null,
+    educationDetails: getProfileEducationDetails(applicationProfile) || null,
     workRightsStatus: applicationProfile.workRightsStatus || null,
     workRightsAnswer: getWorkRightsAnswer(applicationProfile) || null,
     workRightsDetails: normalizeOptionalText(applicationProfile.workRightsDetails) || null,
     driversLicenceStatus: applicationProfile.driversLicenceStatus || null,
     driversLicenceAnswer: getDriversLicenceAnswer(applicationProfile) || null,
+    carAccessStatus: applicationProfile.carAccessStatus || null,
+    carAccessAnswer: getCarAccessAnswer(applicationProfile) || null,
     salaryExpectationAnnual: normalizeOptionalText(applicationProfile.salaryExpectationAnnual) || null,
     employerQuestionNotes: normalizeOptionalText(applicationProfile.employerQuestionNotes) || null
   };
 };
+
+const buildSkillsDetailsText = (
+  candidateProfile: CandidateProfile,
+  applicationProfile?: ApplicationProfile
+): string | undefined =>
+  getProfileSkillsDetails(applicationProfile) ||
+  candidateProfile.skills.filter(Boolean).slice(0, 12).join(', ') ||
+  undefined;
+
+const buildPreviousJobsDetailsText = (
+  candidateProfile: CandidateProfile,
+  applicationProfile?: ApplicationProfile
+): string | undefined =>
+  getProfilePreviousJobsDetails(applicationProfile) ||
+  candidateProfile.experienceHighlights
+    .filter(Boolean)
+    .slice(0, 4)
+    .join(' ') ||
+  undefined;
+
+const buildEducationDetailsText = (
+  candidateProfile: CandidateProfile,
+  applicationProfile?: ApplicationProfile
+): string | undefined =>
+  getProfileEducationDetails(applicationProfile) ||
+  candidateProfile.educationHighlights
+    .filter(Boolean)
+    .slice(0, 4)
+    .join(' ') ||
+  undefined;
 
 const slugify = (value: string): string =>
   value
@@ -403,24 +615,35 @@ const estimateCareerYears = (resume: Resume): number | undefined => {
   return estimatedYears > 0 ? Math.min(estimatedYears, 40) : undefined;
 };
 
-const buildCoverLetterText = (job: Job, candidateProfile: CandidateProfile): string => {
+const buildCoverLetterText = (
+  job: Job,
+  candidateProfile: CandidateProfile,
+  applicationProfile?: ApplicationProfile
+): string => {
+  const manualSkillsDetails = getProfileSkillsDetails(applicationProfile);
+  const manualPreviousJobsDetails = getProfilePreviousJobsDetails(applicationProfile);
   const topSkills = candidateProfile.skills.filter(Boolean).slice(0, 4);
   const skillsText =
-    topSkills.length > 0
+    manualSkillsDetails
+      ? compactText(manualSkillsDetails, 220)
+      : topSkills.length > 0
       ? topSkills.join(', ')
       : 'software delivery, stakeholder collaboration, and problem solving';
-  const experienceText = candidateProfile.experienceHighlights
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(item => compactText(item, 160))
-    .join(' ');
+  const profileSummary = getProfileProfessionalSummary(applicationProfile);
+  const experienceText = manualPreviousJobsDetails
+    ? compactText(manualPreviousJobsDetails, 260)
+    : candidateProfile.experienceHighlights
+        .filter(Boolean)
+        .slice(0, 2)
+        .map(item => compactText(item, 160))
+        .join(' ');
   const yearsText = candidateProfile.estimatedCareerYears
     ? ` with around ${candidateProfile.estimatedCareerYears} years of professional experience`
     : '';
 
   return compactText(
     `I am applying for the ${job.title} role at ${job.company}.${yearsText} My background includes ${skillsText}. ` +
-      `${experienceText ? `Relevant experience includes ${experienceText}. ` : ''}` +
+      `${experienceText ? `Relevant experience includes ${experienceText}. ` : profileSummary ? `${profileSummary} ` : ''}` +
       'I would welcome the opportunity to contribute to your team and discuss how my experience aligns with the role.',
     900
   );
@@ -441,7 +664,29 @@ export const buildApplicationSnapshot = (
   };
 };
 
-const buildCandidateSummaryText = (job: Job, candidateProfile: CandidateProfile): string => {
+const buildCandidateSummaryText = (
+  job: Job,
+  candidateProfile: CandidateProfile,
+  applicationProfile?: ApplicationProfile
+): string => {
+  const profileSummary = getProfileProfessionalSummary(applicationProfile);
+  if (profileSummary) {
+    return compactText(profileSummary, 420);
+  }
+
+  const manualProfileDetails = [
+    getProfileSkillsDetails(applicationProfile),
+    getProfilePreviousJobsDetails(applicationProfile),
+    getProfileEducationDetails(applicationProfile)
+  ]
+    .filter(Boolean)
+    .map(detail => compactText(detail as string, 160))
+    .join(' ');
+
+  if (manualProfileDetails) {
+    return compactText(manualProfileDetails, 420);
+  }
+
   const topSkills = candidateProfile.skills.filter(Boolean).slice(0, 5);
   const skillsText = topSkills.length > 0 ? topSkills.join(', ') : 'relevant technical delivery';
   const yearsText = candidateProfile.estimatedCareerYears
@@ -986,11 +1231,18 @@ type CandidateFieldKind =
   | 'first_name'
   | 'last_name'
   | 'full_name'
+  | 'location'
   | 'linkedin'
   | 'github'
   | 'website'
+  | 'notice_period'
+  | 'availability'
   | 'work_rights'
   | 'drivers_licence'
+  | 'car_access'
+  | 'skills_details'
+  | 'previous_jobs_details'
+  | 'education_details'
   | 'salary_expectation'
   | 'cover_letter'
   | 'motivation'
@@ -1016,9 +1268,28 @@ const inferFieldKind = (
   if (combinedHints.includes('first name') || combinedHints.includes('given name')) return 'first_name';
   if (combinedHints.includes('last name') || combinedHints.includes('surname') || combinedHints.includes('family name')) return 'last_name';
   if (combinedHints.includes('full name') || combinedHints.includes('your name') || combinedHints.includes('name entered')) return 'full_name';
+  if (
+    combinedHints.includes('location') ||
+    combinedHints.includes('address') ||
+    combinedHints.includes('suburb') ||
+    combinedHints.includes('postcode') ||
+    combinedHints.includes('city') ||
+    combinedHints.includes('state')
+  ) {
+    return 'location';
+  }
   if (combinedHints.includes('linkedin')) return 'linkedin';
   if (combinedHints.includes('github')) return 'github';
   if (combinedHints.includes('website') || combinedHints.includes('portfolio') || combinedHints.includes('url')) return 'website';
+  if (combinedHints.includes('notice period') || combinedHints.includes('notice')) return 'notice_period';
+  if (
+    combinedHints.includes('availability') ||
+    combinedHints.includes('available to start') ||
+    combinedHints.includes('when can you start') ||
+    combinedHints.includes('start date')
+  ) {
+    return 'availability';
+  }
   if (
     combinedHints.includes('work rights') ||
     combinedHints.includes('working rights') ||
@@ -1029,6 +1300,18 @@ const inferFieldKind = (
     combinedHints.includes('work visa')
   ) {
     return 'work_rights';
+  }
+  if (hasSkillsDetailsHint(combinedHints)) {
+    return 'skills_details';
+  }
+  if (hasPreviousJobsHint(combinedHints)) {
+    return 'previous_jobs_details';
+  }
+  if (hasEducationHint(combinedHints)) {
+    return 'education_details';
+  }
+  if (hasCarAccessHint(combinedHints)) {
+    return 'car_access';
   }
   if (
     combinedHints.includes('driver') ||
@@ -1094,12 +1377,30 @@ const elementMatchesFieldKind = (element: PageElementSnapshot, fieldKind: Candid
       return hints.includes('last name') || hints.includes('surname') || hints.includes('family name');
     case 'full_name':
       return hints.includes('full name') || hints.includes('your name') || hints.includes('name');
+    case 'location':
+      return (
+        hints.includes('location') ||
+        hints.includes('address') ||
+        hints.includes('suburb') ||
+        hints.includes('postcode') ||
+        hints.includes('city') ||
+        hints.includes('state')
+      );
     case 'linkedin':
       return hints.includes('linkedin');
     case 'github':
       return hints.includes('github');
     case 'website':
       return hints.includes('website') || hints.includes('portfolio') || hints.includes('url');
+    case 'notice_period':
+      return hints.includes('notice period') || hints.includes('notice');
+    case 'availability':
+      return (
+        hints.includes('availability') ||
+        hints.includes('available to start') ||
+        hints.includes('when can you start') ||
+        hints.includes('start date')
+      );
     case 'work_rights':
       return (
         hints.includes('work rights') ||
@@ -1108,12 +1409,20 @@ const elementMatchesFieldKind = (element: PageElementSnapshot, fieldKind: Candid
         hints.includes('sponsorship') ||
         hints.includes('visa')
       );
+    case 'skills_details':
+      return hasSkillsDetailsHint(hints);
+    case 'previous_jobs_details':
+      return hasPreviousJobsHint(hints);
+    case 'education_details':
+      return hasEducationHint(hints);
     case 'drivers_licence':
       return (
         hints.includes('driver') ||
         hints.includes('licence') ||
         hints.includes('license')
       );
+    case 'car_access':
+      return hasCarAccessHint(hints);
     case 'salary_expectation':
       return (
         hints.includes('salary') ||
@@ -1178,32 +1487,46 @@ const getCandidateValueForFieldKind = (
 ): string | undefined => {
   switch (fieldKind) {
     case 'email':
-      return candidateProfile.email;
+      return getProfileEmail(candidateProfile, applicationProfile);
     case 'phone':
-      return candidateProfile.phone;
+      return getProfilePhone(candidateProfile, applicationProfile);
     case 'first_name':
-      return candidateProfile.firstName;
+      return getProfileFirstName(candidateProfile, applicationProfile);
     case 'last_name':
-      return candidateProfile.lastName;
+      return getProfileLastName(candidateProfile, applicationProfile);
     case 'full_name':
-      return candidateProfile.fullName;
+      return getProfileFullName(candidateProfile, applicationProfile);
+    case 'location':
+      return getProfileLocation(applicationProfile);
     case 'linkedin':
-      return candidateProfile.linkedin;
+      return getProfileLinkedin(candidateProfile, applicationProfile);
     case 'github':
-      return candidateProfile.github;
+      return getProfileGithub(candidateProfile, applicationProfile);
     case 'website':
-      return candidateProfile.website || candidateProfile.linkedin || candidateProfile.github;
+      return getProfileWebsite(candidateProfile, applicationProfile);
+    case 'notice_period':
+      return getProfileNoticePeriod(applicationProfile);
+    case 'availability':
+      return getProfileAvailability(applicationProfile);
     case 'work_rights':
       return getWorkRightsAnswer(applicationProfile);
+    case 'skills_details':
+      return buildSkillsDetailsText(candidateProfile, applicationProfile);
+    case 'previous_jobs_details':
+      return buildPreviousJobsDetailsText(candidateProfile, applicationProfile);
+    case 'education_details':
+      return buildEducationDetailsText(candidateProfile, applicationProfile);
     case 'drivers_licence':
       return getDriversLicenceAnswer(applicationProfile);
+    case 'car_access':
+      return getCarAccessAnswer(applicationProfile);
     case 'salary_expectation':
       return normalizeOptionalText(applicationProfile?.salaryExpectationAnnual);
     case 'cover_letter':
     case 'motivation':
-      return buildCoverLetterText(job, candidateProfile);
+      return buildCoverLetterText(job, candidateProfile, applicationProfile);
     case 'summary':
-      return buildCandidateSummaryText(job, candidateProfile);
+      return buildCandidateSummaryText(job, candidateProfile, applicationProfile);
     case 'experience_years':
       return candidateProfile.estimatedCareerYears?.toString();
     case 'generic':
@@ -1243,7 +1566,7 @@ const resolveAutofillText = (
     .toLowerCase();
 
   if (element.type === 'email' || hints.includes('email')) {
-    return candidateProfile.email;
+    return getProfileEmail(candidateProfile, applicationProfile);
   }
 
   if (
@@ -1252,27 +1575,38 @@ const resolveAutofillText = (
     hints.includes('mobile') ||
     hints.includes('contact number')
   ) {
-    return candidateProfile.phone;
+    return getProfilePhone(candidateProfile, applicationProfile);
   }
 
   if (hints.includes('first name') || hints.includes('given name') || hints.includes('forename')) {
-    return candidateProfile.firstName;
+    return getProfileFirstName(candidateProfile, applicationProfile);
   }
 
   if (hints.includes('last name') || hints.includes('surname') || hints.includes('family name')) {
-    return candidateProfile.lastName;
+    return getProfileLastName(candidateProfile, applicationProfile);
   }
 
   if (hints.includes('full name') || hints.includes('your name') || hints === 'name') {
-    return candidateProfile.fullName;
+    return getProfileFullName(candidateProfile, applicationProfile);
+  }
+
+  if (
+    hints.includes('location') ||
+    hints.includes('address') ||
+    hints.includes('suburb') ||
+    hints.includes('postcode') ||
+    hints.includes('city') ||
+    hints.includes('state')
+  ) {
+    return getProfileLocation(applicationProfile);
   }
 
   if (hints.includes('linkedin')) {
-    return candidateProfile.linkedin;
+    return getProfileLinkedin(candidateProfile, applicationProfile);
   }
 
   if (hints.includes('github')) {
-    return candidateProfile.github;
+    return getProfileGithub(candidateProfile, applicationProfile);
   }
 
   if (
@@ -1281,7 +1615,20 @@ const resolveAutofillText = (
     hints.includes('personal site') ||
     hints.includes('url')
   ) {
-    return candidateProfile.website || candidateProfile.linkedin || candidateProfile.github;
+    return getProfileWebsite(candidateProfile, applicationProfile);
+  }
+
+  if (hints.includes('notice period') || hints.includes('notice')) {
+    return getProfileNoticePeriod(applicationProfile);
+  }
+
+  if (
+    hints.includes('availability') ||
+    hints.includes('available to start') ||
+    hints.includes('when can you start') ||
+    hints.includes('start date')
+  ) {
+    return getProfileAvailability(applicationProfile);
   }
 
   if (
@@ -1294,6 +1641,22 @@ const resolveAutofillText = (
     hints.includes('visa')
   ) {
     return getWorkRightsAnswer(applicationProfile);
+  }
+
+  if (hasSkillsDetailsHint(hints)) {
+    return buildSkillsDetailsText(candidateProfile, applicationProfile);
+  }
+
+  if (hasPreviousJobsHint(hints)) {
+    return buildPreviousJobsDetailsText(candidateProfile, applicationProfile);
+  }
+
+  if (hasEducationHint(hints)) {
+    return buildEducationDetailsText(candidateProfile, applicationProfile);
+  }
+
+  if (hasCarAccessHint(hints)) {
+    return getCarAccessAnswer(applicationProfile);
   }
 
   if (
@@ -1315,7 +1678,7 @@ const resolveAutofillText = (
   }
 
   if (hints.includes('cover letter') || hints.includes('covering letter')) {
-    return buildCoverLetterText(job, candidateProfile);
+    return buildCoverLetterText(job, candidateProfile, applicationProfile);
   }
 
   if (
@@ -1324,7 +1687,7 @@ const resolveAutofillText = (
     hints.includes('motivation') ||
     hints.includes('why this role')
   ) {
-    return buildCoverLetterText(job, candidateProfile);
+    return buildCoverLetterText(job, candidateProfile, applicationProfile);
   }
 
   if (
@@ -1333,7 +1696,7 @@ const resolveAutofillText = (
     hints.includes('profile') ||
     hints.includes('introduction')
   ) {
-    return buildCandidateSummaryText(job, candidateProfile);
+    return buildCandidateSummaryText(job, candidateProfile, applicationProfile);
   }
 
   if (
@@ -1347,7 +1710,7 @@ const resolveAutofillText = (
   }
 
   if (hints.includes('name')) {
-    return candidateProfile.fullName;
+    return getProfileFullName(candidateProfile, applicationProfile);
   }
 
   return getCandidateValueForFieldKind(fieldKind, candidateProfile, job, applicationProfile);
@@ -1436,12 +1799,82 @@ const shouldForceContinueAutomation = (
     return true;
   }
 
+  if (hasCarAccessHint(normalizedReason) && getCarAccessAnswer(applicationProfile)) {
+    return true;
+  }
+
+  if (hasSkillsDetailsHint(normalizedReason) && getProfileSkillsDetails(applicationProfile)) {
+    return true;
+  }
+
+  if (hasPreviousJobsHint(normalizedReason) && getProfilePreviousJobsDetails(applicationProfile)) {
+    return true;
+  }
+
+  if (hasEducationHint(normalizedReason) && getProfileEducationDetails(applicationProfile)) {
+    return true;
+  }
+
   if (
     (normalizedReason.includes('salary') ||
       normalizedReason.includes('base salary') ||
       normalizedReason.includes('compensation') ||
       normalizedReason.includes('remuneration')) &&
     normalizeOptionalText(applicationProfile?.salaryExpectationAnnual)
+  ) {
+    return true;
+  }
+
+  if (
+    (normalizedReason.includes('notice') || normalizedReason.includes('start date')) &&
+    getProfileNoticePeriod(applicationProfile)
+  ) {
+    return true;
+  }
+
+  if (
+    (normalizedReason.includes('availability') || normalizedReason.includes('available to start')) &&
+    getProfileAvailability(applicationProfile)
+  ) {
+    return true;
+  }
+
+  if (
+    (normalizedReason.includes('location') ||
+      normalizedReason.includes('address') ||
+      normalizedReason.includes('suburb') ||
+      normalizedReason.includes('postcode')) &&
+    getProfileLocation(applicationProfile)
+  ) {
+    return true;
+  }
+
+  if (
+    (normalizedReason.includes('summary') ||
+      normalizedReason.includes('about you') ||
+      normalizedReason.includes('profile')) &&
+    getProfileProfessionalSummary(applicationProfile)
+  ) {
+    return true;
+  }
+
+  if (
+    (normalizedReason.includes('email') ||
+      normalizedReason.includes('phone') ||
+      normalizedReason.includes('mobile') ||
+      normalizedReason.includes('name') ||
+      normalizedReason.includes('linkedin') ||
+      normalizedReason.includes('github') ||
+      normalizedReason.includes('website') ||
+      normalizedReason.includes('portfolio')) &&
+    (
+      normalizeOptionalText(applicationProfile?.fullName) ||
+      normalizeOptionalText(applicationProfile?.email) ||
+      normalizeOptionalText(applicationProfile?.phone) ||
+      normalizeOptionalText(applicationProfile?.linkedinUrl) ||
+      normalizeOptionalText(applicationProfile?.githubUrl) ||
+      normalizeOptionalText(applicationProfile?.portfolioUrl)
+    )
   ) {
     return true;
   }
@@ -1477,7 +1910,7 @@ const planNextAction = async (
             'You are controlling a browser to complete a job application using only the provided structured page snapshot. ' +
             'Respond only with JSON. Be truthful and use only candidate information present in the provided profile or resume summary. ' +
             'Do not invent qualifications, salary expectations, or sponsorship answers. ' +
-            'Use applicationProfile for explicit user-provided answers to common employer questions such as work rights, driver licence status, salary expectation, and recurring screening notes. If applicationProfile contains the needed answer, continue the application instead of stopping for review. ' +
+            'Use applicationProfile for explicit user-provided contact details, links, location, notice period, availability, professional summary, manual skills, previous jobs, education details, common employer questions, car access, and recurring screening notes. If applicationProfile contains the needed answer, continue the application instead of stopping for review. ' +
             'If a required employer question asks for years of experience or skill exposure, infer a conservative estimate from the resume evidence and choose the lowest supported answer rather than stopping. ' +
             'Use activeResume as the current primary source of truth. You may use resumeLibrary only as alternative stored resumes that you can switch to later, and you must not merge contradictory claims across resumes. ' +
             'If one of the alternative resumes is materially more relevant for this specific role, switch to it by using upload_resume with both targetId and that resumeRef. After you upload a different resume, keep later answers consistent with that uploaded resume. ' +

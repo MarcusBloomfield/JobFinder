@@ -57,9 +57,20 @@ const resumeFileExists = (resume: Resume): boolean => {
   return storedPath.startsWith(UPLOADS_DIR) && fs.existsSync(storedPath);
 };
 
+const normalizeStringArray = (value: unknown): string[] | undefined =>
+  Array.isArray(value)
+    ? value
+        .filter(item => typeof item === 'string')
+        .map(item => item.trim())
+        .filter(Boolean)
+    : undefined;
+
 const normalizeStoredResume = (resume: Resume): Resume => ({
   ...resume,
-  uploadedAt: resume.uploadedAt || new Date().toISOString()
+  uploadedAt: resume.uploadedAt || new Date().toISOString(),
+  skills: normalizeStringArray(resume.skills) || extractSkills(resume.content),
+  experience: normalizeStringArray(resume.experience) || extractExperience(resume.content),
+  education: normalizeStringArray(resume.education) || extractEducation(resume.content)
 });
 
 const readResumeStore = (): Resume[] => {

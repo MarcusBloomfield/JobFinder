@@ -1,7 +1,12 @@
 import { Request, Response } from 'express';
 import { Job } from '../models/Job';
 import { Resume } from '../models/Resume';
-import { ApplicationProfile, DriversLicenceStatus, WorkRightsStatus } from '../models/ApplicationProfile';
+import {
+  ApplicationProfile,
+  CarAccessStatus,
+  DriversLicenceStatus,
+  WorkRightsStatus
+} from '../models/ApplicationProfile';
 import * as applicationAgentService from '../services/applicationAgentService';
 import { scrapeJobListingDetails } from '../services/scrapeService';
 import {
@@ -42,6 +47,7 @@ const WORK_RIGHTS_STATUSES: WorkRightsStatus[] = [
 ];
 
 const DRIVERS_LICENCE_STATUSES: DriversLicenceStatus[] = ['', 'full', 'provisional_or_learner', 'none'];
+const CAR_ACCESS_STATUSES: CarAccessStatus[] = ['', 'regular_access', 'no_regular_access'];
 const APPLICATION_TRIGGER_SOURCES: ApplicationTriggerSource[] = ['manual', 'bulk'];
 
 const validateApplicationProfile = (profile: any): profile is ApplicationProfile | undefined => {
@@ -51,9 +57,23 @@ const validateApplicationProfile = (profile: any): profile is ApplicationProfile
 
   return (
     typeof profile === 'object' &&
+    typeof profile.fullName === 'string' &&
+    typeof profile.email === 'string' &&
+    typeof profile.phone === 'string' &&
+    typeof profile.currentLocation === 'string' &&
+    typeof profile.linkedinUrl === 'string' &&
+    typeof profile.portfolioUrl === 'string' &&
+    typeof profile.githubUrl === 'string' &&
+    typeof profile.noticePeriod === 'string' &&
+    typeof profile.availability === 'string' &&
+    typeof profile.professionalSummary === 'string' &&
+    typeof profile.skillsDetails === 'string' &&
+    typeof profile.previousJobsDetails === 'string' &&
+    typeof profile.educationDetails === 'string' &&
     WORK_RIGHTS_STATUSES.includes(profile.workRightsStatus) &&
     typeof profile.workRightsDetails === 'string' &&
     DRIVERS_LICENCE_STATUSES.includes(profile.driversLicenceStatus) &&
+    CAR_ACCESS_STATUSES.includes(profile.carAccessStatus) &&
     typeof profile.salaryExpectationAnnual === 'string' &&
     typeof profile.employerQuestionNotes === 'string'
   );
@@ -164,7 +184,7 @@ export const applyToJob = async (req: Request, res: Response) => {
       return res.status(400).json({
         error: true,
         message:
-          'Invalid applicationProfile object. Expected work rights, driver licence, salary, and notes fields.'
+          'Invalid applicationProfile object. Expected work rights, driver licence, car access, salary, and notes fields.'
       });
     }
 

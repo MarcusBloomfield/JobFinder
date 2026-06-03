@@ -211,6 +211,14 @@ button:disabled {
   gap: 1rem;
 }
 
+.application-profile-subheading {
+  grid-column: 1 / -1;
+  margin-top: 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--dark-color);
+}
+
 .application-profile-field {
   display: flex;
   flex-direction: column;
@@ -1656,7 +1664,7 @@ textarea {
   .application-detail-job-details-actions {
     align-items: stretch;
   }
-  
+
   .job-list {
     grid-template-columns: 1fr;
   }
