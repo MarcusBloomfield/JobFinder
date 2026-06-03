@@ -73,10 +73,208 @@ interface BrowserSession {
   page: Page;
 }
 
+interface ScrapedJobListingDetails {
+  title?: string;
+  company?: string;
+  description?: string;
+  location?: string;
+  salary?: string;
+  datePosted?: string;
+  suburbOrPostcode?: string;
+}
+
 const dedupeJobs = (jobs: Job[]): Job[] => {
   return Array.from(
     new Map(jobs.map(job => [`${job.title}-${job.company}`, job])).values()
   );
+};
+
+const normalizeWhitespace = (value: string): string => value.replace(/\s+/g, ' ').trim();
+
+const normalizeMultilineText = (value: string): string =>
+  value
+    .replace(/\r/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+const getRandomUserAgent = (): string => {
+  const userAgents = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+  ];
+
+  return userAgents[Math.floor(Math.random() * userAgents.length)];
+};
+
+const getFirstText = (root: any, selectors: string[]): string => {
+  for (const selector of selectors) {
+    const text = normalizeWhitespace(root.find(selector).first().text());
+    if (text) {
+      return text;
+    }
+  }
+
+  return '';
+};
+
+const getFirstMultilineText = (root: any, selectors: string[]): string => {
+  for (const selector of selectors) {
+    const text = normalizeMultilineText(root.find(selector).first().text());
+    if (text) {
+      return text;
+    }
+  }
+
+  return '';
+};
+
+const decodeHtmlToText = (value: string): string =>
+  normalizeMultilineText(cheerio.load(`<div>${value}</div>`).text());
+
+const inferSuburbOrPostcode = (value?: string): string => {
+  const normalized = normalizeWhitespace(value || '');
+  if (!normalized) {
+    return '';
+  }
+
+  const postcodeMatch = normalized.match(/\b\d{4}\b/);
+  if (postcodeMatch) {
+    return postcodeMatch[0];
+  }
+
+  return normalized.split(',')[0]?.trim() || normalized;
+};
+
+const findJobPostingNode = (value: unknown): Record<string, any> | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findJobPostingNode(item);
+      if (found) {
+        return found;
+      }
+    }
+
+    return null;
+  }
+
+  const candidate = value as Record<string, any>;
+  const type = candidate['@type'];
+  if (
+    type === 'JobPosting' ||
+    (Array.isArray(type) && type.includes('JobPosting'))
+  ) {
+    return candidate;
+  }
+
+  for (const nestedValue of Object.values(candidate)) {
+    const found = findJobPostingNode(nestedValue);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+};
+
+const parseJobPostingJsonLd = ($: cheerio.CheerioAPI): ScrapedJobListingDetails => {
+  const parsedDetails: ScrapedJobListingDetails = {};
+
+  $('script[type="application/ld+json"]').each((_, element) => {
+    if (parsedDetails.description && parsedDetails.company && parsedDetails.location) {
+      return;
+    }
+
+    const raw = $(element).contents().text().trim();
+    if (!raw) {
+      return;
+    }
+
+    try {
+      const jobPosting = findJobPostingNode(JSON.parse(raw));
+      if (!jobPosting) {
+        return;
+      }
+
+      const jobLocation = Array.isArray(jobPosting.jobLocation)
+        ? jobPosting.jobLocation[0]
+        : jobPosting.jobLocation;
+      const address = jobLocation?.address || jobLocation;
+      const addressLocality = normalizeWhitespace(address?.addressLocality || '');
+      const addressRegion = normalizeWhitespace(address?.addressRegion || '');
+      const postalCode = normalizeWhitespace(address?.postalCode || '');
+      const locationParts = [addressLocality, addressRegion].filter(Boolean);
+      const location =
+        locationParts.length > 0
+          ? `${locationParts.join(', ')}${postalCode ? ` ${postalCode}` : ''}`.trim()
+          : '';
+
+      parsedDetails.title = normalizeWhitespace(jobPosting.title || '');
+      parsedDetails.company = normalizeWhitespace(jobPosting.hiringOrganization?.name || '');
+      parsedDetails.description = decodeHtmlToText(jobPosting.description || '');
+      parsedDetails.location = location;
+      parsedDetails.suburbOrPostcode = postalCode || addressLocality;
+      parsedDetails.datePosted = normalizeWhitespace(jobPosting.datePosted || '');
+
+      const baseSalary = jobPosting.baseSalary?.value || jobPosting.baseSalary;
+      if (typeof baseSalary?.value === 'number') {
+        parsedDetails.salary = normalizeWhitespace(
+          `${jobPosting.baseSalary?.currency || ''} ${baseSalary.value}`.trim()
+        );
+      } else if (typeof baseSalary?.minValue === 'number' || typeof baseSalary?.maxValue === 'number') {
+        const minimum = typeof baseSalary?.minValue === 'number' ? baseSalary.minValue : '';
+        const maximum = typeof baseSalary?.maxValue === 'number' ? baseSalary.maxValue : '';
+        parsedDetails.salary = normalizeWhitespace(
+          `${jobPosting.baseSalary?.currency || ''} ${minimum}${minimum && maximum ? ' - ' : ''}${maximum}`.trim()
+        );
+      }
+    } catch {
+      // Ignore invalid JSON-LD blocks.
+    }
+  });
+
+  return parsedDetails;
+};
+
+const mergeScrapedDetails = (
+  primary: ScrapedJobListingDetails,
+  fallback: ScrapedJobListingDetails
+): ScrapedJobListingDetails => ({
+  title: primary.title || fallback.title,
+  company: primary.company || fallback.company,
+  description:
+    (primary.description && primary.description.length >= (fallback.description || '').length
+      ? primary.description
+      : fallback.description) || primary.description,
+  location: primary.location || fallback.location,
+  salary: primary.salary || fallback.salary,
+  datePosted: primary.datePosted || fallback.datePosted,
+  suburbOrPostcode: primary.suburbOrPostcode || fallback.suburbOrPostcode
+});
+
+const getClosestJobCard = ($: cheerio.CheerioAPI, element: any): any => {
+  const selectors = [
+    '[data-automation="jobCard"]',
+    'article',
+    'li',
+    '[data-testid="job-card"]'
+  ];
+
+  for (const selector of selectors) {
+    const candidate = $(element).closest(selector).first();
+    if (candidate.length > 0) {
+      return candidate;
+    }
+  }
+
+  return $(element).parent();
 };
 
 const launchBrowserSession = async (
@@ -252,13 +450,7 @@ export const scrapeJobSite = async (
   
   try {
     // Set user agent to avoid being detected as a bot - use a variety of user agents
-    const userAgents = [
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15',
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0',
-      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
-    ];
-    const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
+    const randomUserAgent = getRandomUserAgent();
     console.log(`Using user agent: ${randomUserAgent}`);
     session = await launchBrowserSession(headless, slowMo, randomUserAgent);
     const { page } = session;
@@ -403,15 +595,32 @@ const extractJobsFromPage = async (
     // Process each job with small random delays in between
     for (let i = 0; i < jobElements.length; i++) {
       const element = jobElements[i];
-      
-      const title = $(element).text().trim();
-      const url = 'https://www.seek.com.au' + $(element).attr('href');
-      const company = $(element).closest('[data-automation="jobCard"]').find(config.companySelector).text().trim();
-      const description = $(element).closest('[data-automation="jobCard"]').find('[data-automation="jobShortDescription"]').text().trim();
-      const location = $(element).closest('[data-automation="jobCard"]').find(config.locationSelector || '').text().trim();
-      const salary = $(element).closest('[data-automation="jobCard"]').find(config.salarySelector || '').text().trim();
-      const datePosted = $(element).closest('[data-automation="jobCard"]').find(config.datePostedSelector || '').text().trim();
-      
+      const jobCard = getClosestJobCard($, element);
+      const title = normalizeWhitespace($(element).text());
+      const href = $(element).attr('href');
+      const url = href ? new URL(href, 'https://www.seek.com.au').toString() : '';
+      const company = getFirstText(jobCard, [
+        config.companySelector,
+        '[data-automation="advertiser-name"]',
+        '[data-testid="job-card-company"]'
+      ]);
+      const description = getFirstMultilineText(jobCard, [
+        '[data-automation="jobShortDescription"]',
+        '[data-automation="jobDescription"]',
+        '[data-testid="job-card-teaser"]'
+      ]);
+      const location = getFirstText(jobCard, [
+        config.locationSelector || '',
+        '[data-automation="job-detail-location"]',
+        '[data-testid="job-card-location"]'
+      ].filter(Boolean));
+      const salary = getFirstText(jobCard, [config.salarySelector || ''].filter(Boolean));
+      const datePosted = getFirstText(jobCard, [config.datePostedSelector || ''].filter(Boolean));
+
+      if (!title || !url) {
+        continue;
+      }
+
       jobs.push({
         id: uuidv4(),
         title,
@@ -433,6 +642,77 @@ const extractJobsFromPage = async (
   }
   
   return jobs;
+};
+
+export const scrapeJobListingDetails = async (jobUrl: string): Promise<ScrapedJobListingDetails> => {
+  if (!jobUrl.trim()) {
+    return {};
+  }
+
+  const headless = shouldRunHeadless();
+  const slowMo = getSlowMo(headless);
+  const userAgent = getRandomUserAgent();
+  let session: BrowserSession | undefined;
+
+  try {
+    session = await launchBrowserSession(headless, slowMo, userAgent);
+    const { page } = session;
+
+    await page.goto(jobUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => undefined);
+    await delay(1200);
+
+    const content = await page.content();
+    const $ = cheerio.load(content);
+    const body = $('body');
+
+    const jsonLdDetails = parseJobPostingJsonLd($);
+    const domDetails: ScrapedJobListingDetails = {
+      title: getFirstText(body, [
+        '[data-automation="job-detail-title"]',
+        '[data-testid="job-detail-title"]',
+        'main h1',
+        'h1'
+      ]),
+      company: getFirstText(body, [
+        '[data-automation="advertiser-name"]',
+        '[data-automation="jobCompany"]',
+        '[data-testid="advertiser-name"]',
+        'main a[href*="/companies/"]'
+      ]),
+      description: getFirstMultilineText(body, [
+        '[data-automation="jobAdDetails"]',
+        '[data-automation="jobDescription"]',
+        '[data-testid="job-details"]',
+        'main article'
+      ]),
+      location: getFirstText(body, [
+        '[data-automation="job-detail-location"]',
+        '[data-automation="jobLocation"]',
+        '[data-testid="job-location"]'
+      ]),
+      salary: getFirstText(body, [
+        '[data-automation="job-detail-salary"]',
+        '[data-automation="jobSalary"]'
+      ]),
+      datePosted: getFirstText(body, [
+        '[data-automation="job-detail-date"]',
+        '[data-automation="jobListingDate"]'
+      ])
+    };
+    domDetails.suburbOrPostcode = inferSuburbOrPostcode(domDetails.location);
+
+    return mergeScrapedDetails(jsonLdDetails, domDetails);
+  } catch (error) {
+    console.error(`Error scraping job listing details for ${jobUrl}:`, error);
+    return {};
+  } finally {
+    if (session?.browser) {
+      await session.browser.close();
+    } else if (session?.context) {
+      await session.context.close();
+    }
+  }
 };
 
 /**

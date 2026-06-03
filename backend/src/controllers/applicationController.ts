@@ -3,9 +3,11 @@ import { Job } from '../models/Job';
 import { Resume } from '../models/Resume';
 import { ApplicationProfile, DriversLicenceStatus, WorkRightsStatus } from '../models/ApplicationProfile';
 import * as applicationAgentService from '../services/applicationAgentService';
+import { scrapeJobListingDetails } from '../services/scrapeService';
 import {
   ApplicationTriggerSource,
   createTrackedApplication,
+  enrichTrackedApplicationFromListing,
   failTrackedApplication,
   finalizeTrackedApplication
 } from '../services/applicationTrackingService';
@@ -57,6 +59,80 @@ const validateApplicationProfile = (profile: any): profile is ApplicationProfile
   );
 };
 
+const shouldEnrichTrackedApplication = (application: {
+  company?: string;
+  description?: string;
+  location?: string;
+  jobDetails: {
+    employerName?: string;
+    jobLocation?: string;
+    suburbOrPostcode?: string;
+  };
+} | null): boolean =>
+  Boolean(
+    application &&
+      (
+        !application.company?.trim() ||
+        !application.description?.trim() ||
+        !application.location?.trim() ||
+        !application.jobDetails.employerName?.trim() ||
+        !application.jobDetails.jobLocation?.trim() ||
+        !application.jobDetails.suburbOrPostcode?.trim()
+      )
+  );
+
+const normalizeOptionalText = (value?: string | null): string | undefined => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized ? normalized : undefined;
+};
+
+const choosePreferredText = (
+  currentValue: string | undefined,
+  candidateValue: string | undefined,
+  preferLongerCandidate: boolean = false
+): string | undefined => {
+  const current = normalizeOptionalText(currentValue);
+  const candidate = normalizeOptionalText(candidateValue);
+
+  if (!candidate) {
+    return current;
+  }
+
+  if (!current) {
+    return candidate;
+  }
+
+  if (preferLongerCandidate && candidate.length > current.length) {
+    return candidate;
+  }
+
+  return current;
+};
+
+const hydrateJobForApplication = async (job: Job): Promise<Job> => {
+  try {
+    const listingDetails = await scrapeJobListingDetails(job.url);
+
+    return {
+      ...job,
+      title: choosePreferredText(job.title, listingDetails.title) || job.title,
+      company: choosePreferredText(job.company, listingDetails.company) || job.company,
+      description:
+        choosePreferredText(job.description, listingDetails.description, true) || job.description,
+      location: choosePreferredText(job.location, listingDetails.location) || job.location,
+      salary: choosePreferredText(job.salary, listingDetails.salary) || job.salary,
+      datePosted: choosePreferredText(job.datePosted, listingDetails.datePosted) || job.datePosted
+    };
+  } catch (error) {
+    console.error('Job listing hydration error:', error);
+    return job;
+  }
+};
+
 export const applyToJob = async (req: Request, res: Response) => {
   let trackedApplicationId: string | null = null;
 
@@ -102,15 +178,29 @@ export const applyToJob = async (req: Request, res: Response) => {
       });
     }
 
+    const hydratedJob = await hydrateJobForApplication(job);
+
     const trackedApplication = createTrackedApplication(
-      job,
+      hydratedJob,
       resume,
       applicationProfile,
       triggerSource || 'manual'
     );
     trackedApplicationId = trackedApplication.id;
-    const result = await applicationAgentService.applyToJob(job, resume, applicationProfile);
-    finalizeTrackedApplication(trackedApplication.id, result);
+    const result = await applicationAgentService.applyToJob(
+      hydratedJob,
+      resume,
+      applicationProfile
+    );
+    const finalizedApplication = finalizeTrackedApplication(trackedApplication.id, result);
+
+    if (shouldEnrichTrackedApplication(finalizedApplication)) {
+      try {
+        await enrichTrackedApplicationFromListing(trackedApplication.id);
+      } catch (enrichmentError) {
+        console.error('Tracked application enrichment error:', enrichmentError);
+      }
+    }
 
     res.status(200).json({
       error: false,

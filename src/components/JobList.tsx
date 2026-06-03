@@ -27,7 +27,7 @@ const JobList: React.FC<JobListProps> = ({
       job.applicationStatus !== 'skipped'
   ).length;
 
-  const handleJobClick = (job: Job) => {
+  const handleVisitJobSite = (job: Job) => {
     setVisitedJobIds((prev) => {
       const next = new Set(prev);
       next.add(job.id);
@@ -93,7 +93,6 @@ const JobList: React.FC<JobListProps> = ({
                 <div 
                   key={job.id} 
                   className={`job-card ${visitedJobIds.has(job.id) ? 'visited' : ''}`}
-                  onClick={() => handleJobClick(job)}
                 >
                   <div className="job-header">
                     <h4 className="job-title">{job.title}</h4>
@@ -184,7 +183,13 @@ const JobList: React.FC<JobListProps> = ({
                   )}
                   
                   <div className="job-card-footer">
-                    <span className={`view-details ${visitedJobIds.has(job.id) ? 'visited' : ''}`}>Visit Job Site</span>
+                    <button
+                      type="button"
+                      className={`view-details-button ${visitedJobIds.has(job.id) ? 'visited' : ''}`}
+                      onClick={() => handleVisitJobSite(job)}
+                    >
+                      Visit Job Site
+                    </button>
                     {job.datePosted && <span className="job-date">{job.datePosted}</span>}
                   </div>
                 </div>

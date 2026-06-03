@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { Job } from '../models/Job';
+import { JobDetails } from '../models/JobDetails';
 import { Resume } from '../models/Resume';
 import { ApplicationProfile } from '../models/ApplicationProfile';
 import {
@@ -105,6 +106,33 @@ export const fetchApplicationHistory = async (limit: number = 20): Promise<Track
   }
 
   throw new Error('Invalid response format from application history API');
+};
+
+export const updateApplicationJobDetails = async (
+  applicationId: string,
+  jobDetails: JobDetails
+): Promise<TrackedJobApplication> => {
+  const response = await axios.patch(`${API_URL}/applications/${applicationId}/job-details`, {
+    jobDetails
+  });
+
+  if (response.data && response.data.data) {
+    return response.data.data as TrackedJobApplication;
+  }
+
+  throw new Error('Invalid response format from job details API');
+};
+
+export const enrichTrackedApplicationFromListing = async (
+  applicationId: string
+): Promise<TrackedJobApplication> => {
+  const response = await axios.post(`${API_URL}/applications/${applicationId}/enrich`);
+
+  if (response.data && response.data.data) {
+    return response.data.data as TrackedJobApplication;
+  }
+
+  throw new Error('Invalid response format from application enrichment API');
 };
 
 export const fetchApplicationStatusesForJobs = async (

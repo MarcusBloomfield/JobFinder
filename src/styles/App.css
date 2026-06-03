@@ -674,6 +674,53 @@ button:disabled {
   color: var(--dark-color);
 }
 
+.application-detail-job-details {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border-radius: 12px;
+  border: 1px solid #e8edf1;
+  background-color: #fbfcfd;
+}
+
+.application-detail-job-details-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.application-detail-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.application-detail-field-note {
+  color: var(--gray-color);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.application-detail-error {
+  padding: 0.75rem;
+  border-radius: 8px;
+  background-color: #fdecea;
+  color: #a93226;
+  font-size: 0.9rem;
+}
+
+.application-detail-job-details-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.application-detail-job-details-help {
+  color: var(--gray-color);
+  font-size: 0.9rem;
+}
+
 .application-detail-cover-letter {
   margin-bottom: 1rem;
   padding: 1rem;
@@ -1247,12 +1294,22 @@ textarea {
   font-size: 0.85rem;
 }
 
-.view-details {
+.view-details-button {
+  border: none;
+  background: transparent;
+  padding: 0;
   color: var(--primary-color);
   font-weight: 500;
+  font-size: inherit;
 }
 
-.view-details.visited {
+.view-details-button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--primary-dark);
+  text-decoration: underline;
+}
+
+.view-details-button.visited {
   color: #8e44ad;
 }
 
@@ -1485,6 +1542,10 @@ textarea {
 
   .application-history-meta {
     flex-basis: auto;
+  }
+
+  .application-detail-job-details-actions {
+    align-items: stretch;
   }
   
   .job-list {

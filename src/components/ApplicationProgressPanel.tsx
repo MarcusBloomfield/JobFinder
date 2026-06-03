@@ -1,5 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Job } from '../models/Job';
+import {
+  DEFAULT_JOB_DETAILS,
+  JOB_APPLICATION_METHOD_LABELS,
+  JobApplicationMethod,
+  JobDetails
+} from '../models/JobDetails';
 import {
   ApplicationTrackingSummary,
   TrackedApplicationStatus,
@@ -12,6 +18,8 @@ interface ApplicationProgressPanelProps {
   jobs: Job[];
   isLoading: boolean;
   onRefresh: () => Promise<void>;
+  onUpdateJobDetails: (applicationId: string, jobDetails: JobDetails) => Promise<void>;
+  onEnrichApplication: (applicationId: string) => Promise<void>;
 }
 
 const STATUS_LABELS: Record<TrackedApplicationStatus, string> = {
@@ -21,6 +29,10 @@ const STATUS_LABELS: Record<TrackedApplicationStatus, string> = {
   failed: 'Failed',
   skipped: 'Skipped'
 };
+
+const APPLICATION_METHOD_OPTIONS = Object.entries(JOB_APPLICATION_METHOD_LABELS) as Array<
+  [Exclude<JobApplicationMethod, ''>, string]
+>;
 
 const formatDateLabel = (value: string): string => {
   const date = new Date(`${value}T00:00:00.000Z`);
@@ -48,6 +60,14 @@ const getApplicationTimestampLabel = (application: TrackedJobApplication): strin
 const getApplicationTimestampValue = (application: TrackedJobApplication): string =>
   application.completedAt || application.createdAt;
 
+const shouldEnrichApplication = (application: TrackedJobApplication): boolean =>
+  !application.company.trim() ||
+  !application.description.trim() ||
+  !application.location?.trim() ||
+  !application.jobDetails.employerName.trim() ||
+  !application.jobDetails.jobLocation.trim() ||
+  !application.jobDetails.suburbOrPostcode.trim();
+
 const getSearchSnapshot = (jobs: Job[]) => ({
   discovered: jobs.length,
   strongMatches: jobs.filter(job => (job.matchScore || 0) >= 80).length,
@@ -73,9 +93,18 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
   history,
   jobs,
   isLoading,
-  onRefresh
+  onRefresh,
+  onUpdateJobDetails,
+  onEnrichApplication
 }) => {
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
+  const [jobDetailsDraft, setJobDetailsDraft] = useState<JobDetails>({ ...DEFAULT_JOB_DETAILS });
+  const [jobDetailsError, setJobDetailsError] = useState<string | null>(null);
+  const [isSavingJobDetails, setIsSavingJobDetails] = useState<boolean>(false);
+  const [isEnrichingApplication, setIsEnrichingApplication] = useState<boolean>(false);
+  const [applicationEnrichmentError, setApplicationEnrichmentError] = useState<string | null>(null);
+  const [enrichmentRequestedForApplicationId, setEnrichmentRequestedForApplicationId] =
+    useState<string | null>(null);
   const maxDailyCount = Math.max(1, ...(summary?.recentActivity.map(point => point.totalCount) || [0]));
   const searchSnapshot = getSearchSnapshot(jobs);
   const activePipelineCount = (summary?.statusCounts.applying || 0) + (summary?.statusCounts.review_required || 0);
@@ -83,6 +112,80 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
     () => history.find(application => application.id === selectedApplicationId) || null,
     [history, selectedApplicationId]
   );
+
+  useEffect(() => {
+    if (!selectedApplication) {
+      setJobDetailsDraft({ ...DEFAULT_JOB_DETAILS });
+      setJobDetailsError(null);
+      setApplicationEnrichmentError(null);
+      setEnrichmentRequestedForApplicationId(null);
+      return;
+    }
+
+    setJobDetailsDraft(selectedApplication.jobDetails);
+    setJobDetailsError(null);
+  }, [selectedApplication]);
+
+  useEffect(() => {
+    if (!selectedApplication) {
+      setIsEnrichingApplication(false);
+      return;
+    }
+
+    if (
+      !shouldEnrichApplication(selectedApplication) ||
+      enrichmentRequestedForApplicationId === selectedApplication.id
+    ) {
+      return;
+    }
+
+    setEnrichmentRequestedForApplicationId(selectedApplication.id);
+    setApplicationEnrichmentError(null);
+    setIsEnrichingApplication(true);
+
+    void onEnrichApplication(selectedApplication.id)
+      .catch(error => {
+        setApplicationEnrichmentError(
+          error instanceof Error ? error.message : 'Failed to refresh job details from the listing'
+        );
+      })
+      .finally(() => {
+        setIsEnrichingApplication(false);
+      });
+  }, [selectedApplication, enrichmentRequestedForApplicationId, onEnrichApplication]);
+
+  const updateJobDetailsField = <Field extends keyof JobDetails>(
+    field: Field,
+    value: JobDetails[Field]
+  ): void => {
+    setJobDetailsDraft(currentDetails => ({
+      ...currentDetails,
+      [field]: value
+    }));
+  };
+
+  const handleJobDetailsSubmit = async (
+    event: React.FormEvent<HTMLFormElement>
+  ): Promise<void> => {
+    event.preventDefault();
+
+    if (!selectedApplication) {
+      return;
+    }
+
+    setJobDetailsError(null);
+    setIsSavingJobDetails(true);
+
+    try {
+      await onUpdateJobDetails(selectedApplication.id, jobDetailsDraft);
+    } catch (error) {
+      setJobDetailsError(
+        error instanceof Error ? error.message : 'Failed to save job details'
+      );
+    } finally {
+      setIsSavingJobDetails(false);
+    }
+  };
 
   return (
     <>
@@ -346,6 +449,148 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
               </div>
             </div>
 
+            <div className="application-detail-job-details">
+              <div className="application-progress-subheader">
+                <h4>Job Details</h4>
+                <span>Store the employer and submission details for this application.</span>
+              </div>
+
+              <form className="application-detail-job-details-form" onSubmit={event => void handleJobDetailsSubmit(event)}>
+                <div className="application-detail-form-grid">
+                  <label className="application-profile-field">
+                    <span>Employer name</span>
+                    <input
+                      type="text"
+                      required
+                      disabled={isSavingJobDetails || isEnrichingApplication}
+                      value={jobDetailsDraft.employerName}
+                      onChange={event => updateJobDetailsField('employerName', event.target.value)}
+                    />
+                  </label>
+
+                  <label className="application-profile-field">
+                    <span>Employer contact name (optional)</span>
+                    <input
+                      type="text"
+                      disabled={isSavingJobDetails || isEnrichingApplication}
+                      value={jobDetailsDraft.employerContactName}
+                      onChange={event => updateJobDetailsField('employerContactName', event.target.value)}
+                    />
+                  </label>
+
+                  <label className="application-profile-field">
+                    <span>Employer contact email (optional)</span>
+                    <input
+                      type="email"
+                      disabled={isSavingJobDetails || isEnrichingApplication}
+                      value={jobDetailsDraft.employerContactEmail}
+                      onChange={event => updateJobDetailsField('employerContactEmail', event.target.value)}
+                    />
+                  </label>
+
+                  <label className="application-profile-field">
+                    <span>Employer contact number (optional)</span>
+                    <input
+                      type="tel"
+                      disabled={isSavingJobDetails || isEnrichingApplication}
+                      value={jobDetailsDraft.employerContactNumber}
+                      onChange={event => updateJobDetailsField('employerContactNumber', event.target.value)}
+                    />
+                  </label>
+
+                  <label className="application-profile-field application-profile-field-wide">
+                    <span>Job title</span>
+                    <input
+                      type="text"
+                      required
+                      disabled={isSavingJobDetails || isEnrichingApplication}
+                      value={jobDetailsDraft.jobTitle}
+                      onChange={event => updateJobDetailsField('jobTitle', event.target.value)}
+                    />
+                    <small className="application-detail-field-note">
+                      This should be the same as what was listed in the application.
+                    </small>
+                  </label>
+
+                  <label className="application-profile-field">
+                    <span>Location of job (optional)</span>
+                    <input
+                      type="text"
+                      disabled={isSavingJobDetails || isEnrichingApplication}
+                      value={jobDetailsDraft.jobLocation}
+                      onChange={event => updateJobDetailsField('jobLocation', event.target.value)}
+                    />
+                  </label>
+
+                  <label className="application-profile-field">
+                    <span>Suburb or postcode</span>
+                    <input
+                      type="text"
+                      required
+                      disabled={isSavingJobDetails || isEnrichingApplication}
+                      value={jobDetailsDraft.suburbOrPostcode}
+                      onChange={event => updateJobDetailsField('suburbOrPostcode', event.target.value)}
+                    />
+                  </label>
+
+                  <label className="application-profile-field">
+                    <span>How did you apply?</span>
+                    <select
+                      required
+                      disabled={isSavingJobDetails || isEnrichingApplication}
+                      value={jobDetailsDraft.applicationMethod}
+                      onChange={event =>
+                        updateJobDetailsField(
+                          'applicationMethod',
+                          event.target.value as JobApplicationMethod
+                        )
+                      }
+                    >
+                      <option value="">Please select</option>
+                      {APPLICATION_METHOD_OPTIONS.map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="application-profile-field">
+                    <span>Application submitted date</span>
+                    <input
+                      type="date"
+                      required
+                      disabled={isSavingJobDetails || isEnrichingApplication}
+                      value={jobDetailsDraft.applicationSubmittedDate}
+                      onChange={event =>
+                        updateJobDetailsField('applicationSubmittedDate', event.target.value)
+                      }
+                    />
+                  </label>
+                </div>
+
+                {jobDetailsError && <p className="application-detail-error">{jobDetailsError}</p>}
+                {applicationEnrichmentError && (
+                  <p className="application-detail-error">{applicationEnrichmentError}</p>
+                )}
+
+                <div className="application-detail-job-details-actions">
+                  <span className="application-detail-job-details-help">
+                    {isEnrichingApplication
+                      ? 'Refreshing missing details from the job listing...'
+                      : 'Employer contact details and the broader job location remain optional.'}
+                  </span>
+                  <button type="submit" disabled={isSavingJobDetails || isEnrichingApplication}>
+                    {isSavingJobDetails
+                      ? 'Saving...'
+                      : isEnrichingApplication
+                        ? 'Refreshing...'
+                        : 'Save Job Details'}
+                  </button>
+                </div>
+              </form>
+            </div>
+
             <div className="application-detail-cover-letter">
               <div className="application-progress-subheader">
                 <h4>Cover Letter</h4>
@@ -367,7 +612,11 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
             <div className="application-detail-job-description">
               <div className="application-progress-subheader">
                 <h4>Full Job Description</h4>
-                <span>Stored with the application snapshot</span>
+                <span>
+                  {isEnrichingApplication
+                    ? 'Refreshing the stored description from the listing'
+                    : 'Stored with the application snapshot'}
+                </span>
               </div>
               <div className="application-detail-job-description-body">
                 {selectedApplication.description ? (

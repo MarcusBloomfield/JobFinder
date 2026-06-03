@@ -8,8 +8,10 @@ import {
   buildApplicationSnapshot
 } from './applicationAgentService';
 import { ApplicationProfile } from '../models/ApplicationProfile';
+import { DEFAULT_JOB_DETAILS, JobApplicationMethod, JobDetails, normalizeJobDetails } from '../models/JobDetails';
 import { Job } from '../models/Job';
 import { Resume } from '../models/Resume';
+import { scrapeJobListingDetails } from './scrapeService';
 
 type SqliteStatement = {
   run: (...params: unknown[]) => { changes: number; lastInsertRowid: number | bigint };
@@ -40,6 +42,7 @@ export interface TrackedJobApplication {
   salary?: string;
   datePosted?: string;
   matchScore?: number;
+  jobDetails: JobDetails;
   resumeId: string;
   resumeFileName: string;
   coverLetterText?: string;
@@ -86,6 +89,7 @@ interface TrackedApplicationRow {
   salary: string | null;
   date_posted: string | null;
   match_score: number | null;
+  job_details_json: string | null;
   resume_id: string;
   resume_file_name: string;
   cover_letter_text: string | null;
@@ -164,12 +168,138 @@ const normalizeOptionalText = (value?: string | null): string | undefined => {
   return normalized ? normalized : undefined;
 };
 
+const toDateOnly = (value: string): string => value.slice(0, 10);
+
+const inferApplicationMethodFromUrl = (value?: string | null): JobApplicationMethod => {
+  const normalizedUrl = normalizeOptionalText(value);
+  if (!normalizedUrl) {
+    return '';
+  }
+
+  try {
+    const { hostname } = new URL(normalizedUrl);
+    if (hostname.includes('seek.')) {
+      return 'seek';
+    }
+
+    if (hostname.includes('linkedin.')) {
+      return 'linkedin';
+    }
+
+    if (hostname.includes('indeed.')) {
+      return 'indeed';
+    }
+
+    return 'company_website';
+  } catch {
+    return 'other';
+  }
+};
+
+const inferSuburbOrPostcodeFromLocation = (value?: string | null): string => {
+  const normalizedLocation = normalizeOptionalText(value);
+  if (!normalizedLocation) {
+    return '';
+  }
+
+  const postcodeMatch = normalizedLocation.match(/\b\d{4}\b/);
+  if (postcodeMatch) {
+    return postcodeMatch[0];
+  }
+
+  return normalizedLocation.split(',')[0]?.trim() || normalizedLocation;
+};
+
+const buildTrackedJobDetails = (
+  candidate: Partial<JobDetails> | null | undefined,
+  fallback: {
+    company?: string | null;
+    title?: string | null;
+    location?: string | null;
+    jobUrl?: string | null;
+  }
+): JobDetails =>
+  normalizeJobDetails({
+    ...DEFAULT_JOB_DETAILS,
+    employerName: fallback.company || '',
+    jobTitle: fallback.title || '',
+    jobLocation: fallback.location || '',
+    suburbOrPostcode: inferSuburbOrPostcodeFromLocation(fallback.location),
+    applicationMethod: inferApplicationMethodFromUrl(fallback.jobUrl),
+    ...candidate
+  });
+
+const choosePreferredText = (
+  currentValue?: string | null,
+  candidateValue?: string | null,
+  options?: { preferLongerCandidate?: boolean; longerThreshold?: number }
+): string | undefined => {
+  const current = normalizeOptionalText(currentValue);
+  const candidate = normalizeOptionalText(candidateValue);
+
+  if (!candidate) {
+    return current;
+  }
+
+  if (!current) {
+    return candidate;
+  }
+
+  if (options?.preferLongerCandidate) {
+    const threshold = options.longerThreshold ?? 40;
+    if (candidate.length >= current.length + threshold) {
+      return candidate;
+    }
+  }
+
+  return current;
+};
+
+const buildInitialJobDetails = (job: Job): JobDetails =>
+  buildTrackedJobDetails(undefined, {
+    company: job.company,
+    title: job.title,
+    location: job.location,
+    jobUrl: job.url
+  });
+
+const buildFinalizedJobDetails = (
+  application: TrackedJobApplication | null,
+  result: JobApplicationResult,
+  completedAt: string
+): JobDetails =>
+  buildTrackedJobDetails(
+    {
+      ...application?.jobDetails,
+      applicationMethod:
+        application?.jobDetails.applicationMethod || inferApplicationMethodFromUrl(result.finalUrl),
+      applicationSubmittedDate:
+        result.status === 'applied'
+          ? application?.jobDetails.applicationSubmittedDate || toDateOnly(completedAt)
+          : application?.jobDetails.applicationSubmittedDate || ''
+    },
+    {
+      company: application?.company,
+      title: application?.title,
+      location: application?.location,
+      jobUrl: application?.jobUrl || result.finalUrl
+    }
+  );
+
 const parseJsonArray = <T>(value: string, fallback: T[]): T[] => {
   try {
     const parsed = JSON.parse(value);
     return Array.isArray(parsed) ? (parsed as T[]) : fallback;
   } catch {
     return fallback;
+  }
+};
+
+const parseJobDetails = (value: string | null): JobDetails => {
+  try {
+    return normalizeJobDetails(value ? JSON.parse(value) : undefined);
+  } catch {
+    return { ...DEFAULT_JOB_DETAILS };
   }
 };
 
@@ -250,6 +380,10 @@ const getDatabase = (): SqliteDatabase => {
     database.exec(`ALTER TABLE job_applications ADD COLUMN cover_letter_used INTEGER NOT NULL DEFAULT 0`);
   }
 
+  if (!knownColumns.has('job_details_json')) {
+    database.exec(`ALTER TABLE job_applications ADD COLUMN job_details_json TEXT NOT NULL DEFAULT '{}'`);
+  }
+
   return database;
 };
 
@@ -264,6 +398,12 @@ const mapTrackedApplicationRow = (row: TrackedApplicationRow): TrackedJobApplica
   salary: normalizeOptionalText(row.salary),
   datePosted: normalizeOptionalText(row.date_posted),
   matchScore: typeof row.match_score === 'number' ? row.match_score : undefined,
+  jobDetails: buildTrackedJobDetails(parseJobDetails(row.job_details_json), {
+    company: row.company,
+    title: row.title,
+    location: row.location,
+    jobUrl: row.job_url
+  }),
   resumeId: row.resume_id,
   resumeFileName: row.resume_file_name,
   coverLetterText: normalizeOptionalText(row.cover_letter_text),
@@ -295,6 +435,7 @@ const getLatestTrackedApplicationByNormalizedUrl = (normalizedJobUrl: string): T
           salary,
           date_posted,
           match_score,
+          job_details_json,
           resume_id,
           resume_file_name,
           cover_letter_text,
@@ -372,6 +513,7 @@ export const createTrackedApplication = (
   const now = new Date().toISOString();
   const normalizedJobUrl = normalizeJobUrl(job.url);
   const applicationSnapshot = buildApplicationSnapshot(job, resume);
+  const jobDetails = buildInitialJobDetails(job);
 
   getDatabase()
     .prepare(
@@ -388,6 +530,7 @@ export const createTrackedApplication = (
           salary,
           date_posted,
           match_score,
+          job_details_json,
           resume_id,
           resume_file_name,
           cover_letter_text,
@@ -403,7 +546,7 @@ export const createTrackedApplication = (
           created_at,
           updated_at,
           completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     )
     .run(
@@ -418,6 +561,7 @@ export const createTrackedApplication = (
       job.salary || null,
       job.datePosted || null,
       typeof job.matchScore === 'number' ? Math.round(job.matchScore) : null,
+      JSON.stringify(jobDetails),
       applicationSnapshot.resumeId,
       applicationSnapshot.resumeFileName,
       applicationSnapshot.coverLetterText || null,
@@ -446,6 +590,7 @@ export const createTrackedApplication = (
     salary: normalizeOptionalText(job.salary),
     datePosted: normalizeOptionalText(job.datePosted),
     matchScore: typeof job.matchScore === 'number' ? Math.round(job.matchScore) : undefined,
+    jobDetails,
     resumeId: applicationSnapshot.resumeId,
     resumeFileName: applicationSnapshot.resumeFileName,
     coverLetterText: applicationSnapshot.coverLetterText,
@@ -467,6 +612,8 @@ export const finalizeTrackedApplication = (
 ): TrackedJobApplication | null => {
   const now = new Date().toISOString();
   const applicationSnapshot = result.applicationSnapshot;
+  const existingApplication = getTrackedApplicationById(applicationId);
+  const jobDetails = buildFinalizedJobDetails(existingApplication, result, now);
 
   getDatabase()
     .prepare(
@@ -483,6 +630,7 @@ export const finalizeTrackedApplication = (
           resume_file_name = ?,
           cover_letter_text = ?,
           cover_letter_used = ?,
+          job_details_json = ?,
           updated_at = ?,
           completed_at = ?
         WHERE id = ?
@@ -499,6 +647,7 @@ export const finalizeTrackedApplication = (
       applicationSnapshot.resumeFileName,
       applicationSnapshot.coverLetterText || null,
       applicationSnapshot.coverLetterUsed ? 1 : 0,
+      JSON.stringify(jobDetails),
       now,
       now,
       applicationId
@@ -527,6 +676,128 @@ export const failTrackedApplication = (applicationId: string, message: string): 
   return getTrackedApplicationById(applicationId);
 };
 
+export const updateTrackedApplicationJobDetails = (
+  applicationId: string,
+  jobDetails: JobDetails
+): TrackedJobApplication | null => {
+  const now = new Date().toISOString();
+  const result = getDatabase()
+    .prepare(
+      `
+        UPDATE job_applications
+        SET
+          job_details_json = ?,
+          updated_at = ?
+        WHERE id = ?
+      `
+    )
+    .run(JSON.stringify(normalizeJobDetails(jobDetails)), now, applicationId);
+
+  if (result.changes === 0) {
+    return null;
+  }
+
+  return getTrackedApplicationById(applicationId);
+};
+
+export const enrichTrackedApplicationFromListing = async (
+  applicationId: string
+): Promise<TrackedJobApplication | null> => {
+  const existingApplication = getTrackedApplicationById(applicationId);
+
+  if (!existingApplication) {
+    return null;
+  }
+
+  const scrapedDetails = await scrapeJobListingDetails(existingApplication.jobUrl);
+  const nextTitle = choosePreferredText(existingApplication.title, scrapedDetails.title) || existingApplication.title;
+  const nextCompany =
+    choosePreferredText(existingApplication.company, scrapedDetails.company) || existingApplication.company;
+  const nextDescription =
+    choosePreferredText(existingApplication.description, scrapedDetails.description, {
+      preferLongerCandidate: true,
+      longerThreshold: 20
+    }) || existingApplication.description;
+  const nextLocation =
+    choosePreferredText(existingApplication.location, scrapedDetails.location) || existingApplication.location;
+  const nextSalary =
+    choosePreferredText(existingApplication.salary, scrapedDetails.salary) || existingApplication.salary;
+  const nextDatePosted =
+    choosePreferredText(existingApplication.datePosted, scrapedDetails.datePosted) || existingApplication.datePosted;
+  const nextJobDetails = buildTrackedJobDetails(
+    {
+      ...existingApplication.jobDetails,
+      employerName:
+        existingApplication.jobDetails.employerName ||
+        scrapedDetails.company ||
+        nextCompany,
+      jobTitle:
+        existingApplication.jobDetails.jobTitle ||
+        scrapedDetails.title ||
+        nextTitle,
+      jobLocation:
+        existingApplication.jobDetails.jobLocation ||
+        scrapedDetails.location ||
+        nextLocation ||
+        '',
+      suburbOrPostcode:
+        existingApplication.jobDetails.suburbOrPostcode ||
+        scrapedDetails.suburbOrPostcode ||
+        inferSuburbOrPostcodeFromLocation(scrapedDetails.location || nextLocation)
+    },
+    {
+      company: nextCompany,
+      title: nextTitle,
+      location: nextLocation,
+      jobUrl: existingApplication.jobUrl
+    }
+  );
+
+  const changed =
+    nextTitle !== existingApplication.title ||
+    nextCompany !== existingApplication.company ||
+    nextDescription !== existingApplication.description ||
+    nextLocation !== existingApplication.location ||
+    nextSalary !== existingApplication.salary ||
+    nextDatePosted !== existingApplication.datePosted ||
+    JSON.stringify(nextJobDetails) !== JSON.stringify(existingApplication.jobDetails);
+
+  if (!changed) {
+    return existingApplication;
+  }
+
+  const now = new Date().toISOString();
+  getDatabase()
+    .prepare(
+      `
+        UPDATE job_applications
+        SET
+          title = ?,
+          company = ?,
+          description = ?,
+          location = ?,
+          salary = ?,
+          date_posted = ?,
+          job_details_json = ?,
+          updated_at = ?
+        WHERE id = ?
+      `
+    )
+    .run(
+      nextTitle,
+      nextCompany,
+      nextDescription,
+      nextLocation || null,
+      nextSalary || null,
+      nextDatePosted || null,
+      JSON.stringify(nextJobDetails),
+      now,
+      applicationId
+    );
+
+  return getTrackedApplicationById(applicationId);
+};
+
 export const getTrackedApplicationById = (applicationId: string): TrackedJobApplication | null => {
   const row = getDatabase()
     .prepare(
@@ -542,6 +813,7 @@ export const getTrackedApplicationById = (applicationId: string): TrackedJobAppl
           salary,
           date_posted,
           match_score,
+          job_details_json,
           resume_id,
           resume_file_name,
           cover_letter_text,
@@ -582,6 +854,7 @@ export const listTrackedApplications = (limit = DEFAULT_HISTORY_LIMIT): TrackedJ
           salary,
           date_posted,
           match_score,
+          job_details_json,
           resume_id,
           resume_file_name,
           cover_letter_text,

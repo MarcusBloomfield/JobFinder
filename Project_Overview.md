@@ -141,6 +141,23 @@ JobFinder/
 }
 ```
 
+### JobDetails
+```typescript
+{
+  employerName: string;
+  employerContactName: string;
+  employerContactEmail: string;
+  employerContactNumber: string;
+  jobTitle: string;
+  jobLocation: string;
+  suburbOrPostcode: string;
+  applicationMethod: '' | 'seek' | 'company_website' | 'linkedin' | 'indeed' | 'email' | 'recruiter' | 'referral' | 'other';
+  applicationSubmittedDate: string;  // YYYY-MM-DD
+}
+```
+
+> **Tracked applications** now persist a `jobDetails` payload in SQLite and expose it through the Progress modal for manual completion and editing. When core fields are missing, the modal can also rehydrate company, location, and description from the original job listing.
+
 > **Note:** Models are duplicated across `src/models/` and `backend/src/models/`. Keep them in sync when changing the shape.
 
 ---
@@ -156,6 +173,8 @@ JobFinder/
 | POST | `/api/openai/generate-search-terms` | Generate search terms from resume via Gemini |
 | POST | `/api/openai/evaluate-job-match` | Single job match evaluation |
 | POST | `/api/openai/evaluate-job-matches-bulk` | Bulk scoring (batched, retried, with fallback) |
+| POST | `/api/applications/:applicationId/enrich` | Refresh missing tracked application metadata from the original listing |
+| PATCH | `/api/applications/:applicationId/job-details` | Save persisted employer/application details for a tracked job |
 
 ---
 

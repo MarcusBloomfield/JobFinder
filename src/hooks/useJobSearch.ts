@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Resume } from '../models/Resume';
 import { Job } from '../models/Job';
+import { JobDetails } from '../models/JobDetails';
 import {
   ApplicationProfile,
   DEFAULT_APPLICATION_PROFILE,
@@ -15,8 +16,10 @@ import {
   fetchApplicationHistory,
   fetchApplicationStatusesForJobs,
   fetchApplicationTrackingSummary,
+  enrichTrackedApplicationFromListing,
   normalizeTrackedJobUrl,
-  openSeekLoginBrowser
+  openSeekLoginBrowser,
+  updateApplicationJobDetails
 } from '../services/applicationService';
 
 interface JobSearchState {
@@ -51,6 +54,8 @@ interface JobSearchActions {
   setJobSearchAmount: (amount: number) => void;
   updateApplicationProfile: (updates: Partial<ApplicationProfile>) => void;
   refreshApplicationTracking: () => Promise<void>;
+  updateTrackedApplicationJobDetails: (applicationId: string, jobDetails: JobDetails) => Promise<void>;
+  enrichTrackedApplication: (applicationId: string) => Promise<void>;
 }
 
 interface ApplyRunOutcome {
@@ -561,6 +566,49 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     );
   };
 
+  const updateTrackedApplicationJobDetails = async (
+    applicationId: string,
+    jobDetails: JobDetails
+  ): Promise<void> => {
+    const updatedApplication = await updateApplicationJobDetails(applicationId, jobDetails);
+
+    setApplicationHistory(currentHistory =>
+      currentHistory.map(application =>
+        application.id === updatedApplication.id ? updatedApplication : application
+      )
+    );
+    setApplicationTrackingSummary(currentSummary =>
+      currentSummary
+        ? {
+            ...currentSummary,
+            recentApplications: currentSummary.recentApplications.map(application =>
+              application.id === updatedApplication.id ? updatedApplication : application
+            )
+          }
+        : currentSummary
+    );
+  };
+
+  const enrichTrackedApplication = async (applicationId: string): Promise<void> => {
+    const updatedApplication = await enrichTrackedApplicationFromListing(applicationId);
+
+    setApplicationHistory(currentHistory =>
+      currentHistory.map(application =>
+        application.id === updatedApplication.id ? updatedApplication : application
+      )
+    );
+    setApplicationTrackingSummary(currentSummary =>
+      currentSummary
+        ? {
+            ...currentSummary,
+            recentApplications: currentSummary.recentApplications.map(application =>
+              application.id === updatedApplication.id ? updatedApplication : application
+            )
+          }
+        : currentSummary
+    );
+  };
+
   return [
     {
       resume,
@@ -592,7 +640,9 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       setLocation: updateLocation,
       setJobSearchAmount,
       updateApplicationProfile,
-      refreshApplicationTracking: loadApplicationTrackingData
+      refreshApplicationTracking: loadApplicationTrackingData,
+      updateTrackedApplicationJobDetails,
+      enrichTrackedApplication
     }
   ];
 };

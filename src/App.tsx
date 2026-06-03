@@ -48,7 +48,9 @@ const App: React.FC = () => {
             setLocation,
             setJobSearchAmount,
             updateApplicationProfile,
-            refreshApplicationTracking
+            refreshApplicationTracking,
+            updateTrackedApplicationJobDetails,
+            enrichTrackedApplication
         }
     ] = useJobSearch();
 
@@ -103,6 +105,8 @@ const App: React.FC = () => {
                         jobs={jobs}
                         isLoading={isApplicationTrackingLoading}
                         onRefresh={refreshApplicationTracking}
+                        onUpdateJobDetails={updateTrackedApplicationJobDetails}
+                        onEnrichApplication={enrichTrackedApplication}
                     />
                 ) : (
                     <>

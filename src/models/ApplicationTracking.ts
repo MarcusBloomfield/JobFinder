@@ -1,3 +1,5 @@
+import { JobDetails } from './JobDetails';
+
 export type TrackedApplicationStatus = 'applying' | 'applied' | 'review_required' | 'failed' | 'skipped';
 export type ApplicationTriggerSource = 'manual' | 'bulk';
 
@@ -19,6 +21,7 @@ export interface TrackedJobApplication {
   salary?: string;
   datePosted?: string;
   matchScore?: number;
+  jobDetails: JobDetails;
   resumeId: string;
   resumeFileName: string;
   coverLetterText?: string;
