@@ -18,4 +18,6 @@ export interface Job {
     filePath: string;
     url: string;
   }>;
+  applicationTrackingId?: string;
+  applicationUpdatedAt?: string;
 } 

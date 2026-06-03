@@ -14,6 +14,7 @@ WebJobFinder is a web application that helps job seekers find relevant job oppor
 - **AI Analysis**: Uses OpenAI to extract relevant search terms from your resume
 - **Job Scraping**: Scrapes job listings from popular job sites like Seek, Indeed, and LinkedIn
 - **Smart Matching**: Evaluates how well each job posting matches your resume
+- **Application Tracking**: Stores auto-apply runs in a local SQLite database for persistent progress tracking
 - **Favorites**: Save jobs you're interested in for later review
 
 ## Project Structure
@@ -37,13 +38,14 @@ This project consists of two main parts:
 - Cheerio for HTML parsing
 - Multer for file uploads
 - PDF and DOCX parsing libraries
+- SQLite via Node's built-in `node:sqlite`
 
 ### Shared
 - OpenAI API integration
 
 ## Prerequisites
 
-- Node.js (v16 or later)
+- Node.js (v24 or later recommended)
 - NPM or Yarn
 - OpenAI API key
 
@@ -110,6 +112,11 @@ This project consists of two main parts:
 5. Click "Search Jobs" to find matching jobs
 6. Review job listings and their match scores
 7. Click on a job to view details and apply directly through the original job posting
+
+## Persistent Application Data
+
+Applied jobs are now written to a local SQLite database at `backend/data/jobfinder.sqlite`.
+The backend also exposes summary and history endpoints that the UI uses for the Application Tracking panel and for restoring job statuses on later searches.
 
 ## Security Note
 

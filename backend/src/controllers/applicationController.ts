@@ -3,6 +3,12 @@ import { Job } from '../models/Job';
 import { Resume } from '../models/Resume';
 import { ApplicationProfile, DriversLicenceStatus, WorkRightsStatus } from '../models/ApplicationProfile';
 import * as applicationAgentService from '../services/applicationAgentService';
+import {
+  ApplicationTriggerSource,
+  createTrackedApplication,
+  failTrackedApplication,
+  finalizeTrackedApplication
+} from '../services/applicationTrackingService';
 
 const validateJob = (job: any): job is Job => {
   return (
@@ -34,6 +40,7 @@ const WORK_RIGHTS_STATUSES: WorkRightsStatus[] = [
 ];
 
 const DRIVERS_LICENCE_STATUSES: DriversLicenceStatus[] = ['', 'full', 'provisional_or_learner', 'none'];
+const APPLICATION_TRIGGER_SOURCES: ApplicationTriggerSource[] = ['manual', 'bulk'];
 
 const validateApplicationProfile = (profile: any): profile is ApplicationProfile | undefined => {
   if (profile === undefined || profile === null) {
@@ -51,8 +58,10 @@ const validateApplicationProfile = (profile: any): profile is ApplicationProfile
 };
 
 export const applyToJob = async (req: Request, res: Response) => {
+  let trackedApplicationId: string | null = null;
+
   try {
-    const { job, resume, applicationProfile } = req.body;
+    const { job, resume, applicationProfile, triggerSource } = req.body;
 
     if (!job || !resume) {
       return res.status(400).json({
@@ -83,15 +92,44 @@ export const applyToJob = async (req: Request, res: Response) => {
       });
     }
 
+    if (
+      triggerSource !== undefined &&
+      (!APPLICATION_TRIGGER_SOURCES.includes(triggerSource) || typeof triggerSource !== 'string')
+    ) {
+      return res.status(400).json({
+        error: true,
+        message: 'Invalid triggerSource. Expected "manual" or "bulk".'
+      });
+    }
+
+    const trackedApplication = createTrackedApplication(
+      job,
+      resume,
+      applicationProfile,
+      triggerSource || 'manual'
+    );
+    trackedApplicationId = trackedApplication.id;
     const result = await applicationAgentService.applyToJob(job, resume, applicationProfile);
+    finalizeTrackedApplication(trackedApplication.id, result);
 
     res.status(200).json({
       error: false,
       message: result.message,
-      data: result
+      data: {
+        ...result,
+        trackingId: trackedApplication.id
+      }
     });
   } catch (error) {
     console.error('Error in applyToJob controller:', error);
+
+    if (trackedApplicationId) {
+      failTrackedApplication(
+        trackedApplicationId,
+        error instanceof Error ? error.message : 'An unknown error occurred'
+      );
+    }
+
     res.status(500).json({
       error: true,
       message: error instanceof Error ? error.message : 'An unknown error occurred'

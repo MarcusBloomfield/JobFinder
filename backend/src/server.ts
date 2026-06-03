@@ -9,12 +9,16 @@ import scrapeRoutes from './routes/scrapeRoutes';
 import resumeRoutes from './routes/resumeRoutes';
 import openaiRoutes from './routes/openaiRoutes';
 import applicationRoutes from './routes/applicationRoutes';
+import applicationTrackingRoutes from './routes/applicationTrackingRoutes';
+import { initializeApplicationTracking } from './services/applicationTrackingService';
 
 // Load environment variables
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+initializeApplicationTracking();
 
 // Middleware
 app.use(cors());
@@ -27,6 +31,7 @@ app.use('/api/scrape', scrapeRoutes);
 app.use('/api/resume', resumeRoutes);
 app.use('/api/openai', openaiRoutes);
 app.use('/api/apply', applicationRoutes);
+app.use('/api/applications', applicationTrackingRoutes);
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {

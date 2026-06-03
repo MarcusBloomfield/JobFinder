@@ -6,10 +6,18 @@ import {
   DEFAULT_APPLICATION_PROFILE,
   normalizeApplicationProfile
 } from '../models/ApplicationProfile';
+import { ApplicationTrackingSummary, ApplicationTriggerSource, TrackedJobApplication } from '../models/ApplicationTracking';
 import { getStoredResume, listStoredResumes, parseResume } from '../services/resumeParserService';
 import { generateSearchTerms, evaluateJobMatch, evaluateJobMatchesBulk } from '../services/openAiService';
 import { scrapeJobs } from '../services/scrapeService';
-import { applyToJob as autoApplyToJob, openSeekLoginBrowser } from '../services/applicationService';
+import {
+  applyToJob as autoApplyToJob,
+  fetchApplicationHistory,
+  fetchApplicationStatusesForJobs,
+  fetchApplicationTrackingSummary,
+  normalizeTrackedJobUrl,
+  openSeekLoginBrowser
+} from '../services/applicationService';
 
 interface JobSearchState {
   resume: Resume | null;
@@ -25,6 +33,9 @@ interface JobSearchState {
   isSeekLoginLoading: boolean;
   isStoredResumesLoading: boolean;
   applicationProfile: ApplicationProfile;
+  applicationTrackingSummary: ApplicationTrackingSummary | null;
+  applicationHistory: TrackedJobApplication[];
+  isApplicationTrackingLoading: boolean;
 }
 
 interface JobSearchActions {
@@ -39,6 +50,7 @@ interface JobSearchActions {
   setLocation: (location: string) => void;
   setJobSearchAmount: (amount: number) => void;
   updateApplicationProfile: (updates: Partial<ApplicationProfile>) => void;
+  refreshApplicationTracking: () => Promise<void>;
 }
 
 interface ApplyRunOutcome {
@@ -84,6 +96,25 @@ const isFatalBatchApplyErrorMessage = (message: string): boolean => {
 const buildBatchStopMessage = (reason: string): string =>
   `Fully automatic apply stopped because the application service hit a blocking upstream error: ${reason}`;
 
+const mergeTrackedApplicationIntoJob = (job: Job, trackedApplication?: TrackedJobApplication): Job => {
+  if (!trackedApplication) {
+    return {
+      ...job,
+      applicationStatus: job.applicationStatus || 'idle'
+    };
+  }
+
+  return {
+    ...job,
+    applicationStatus: trackedApplication.status,
+    applicationMessage: trackedApplication.message,
+    applicationLogs: trackedApplication.logs,
+    applicationArtifacts: trackedApplication.artifacts,
+    applicationTrackingId: trackedApplication.id,
+    applicationUpdatedAt: trackedApplication.updatedAt
+  };
+};
+
 const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   const [resume, setResume] = useState<Resume | null>(null);
   const [storedResumes, setStoredResumes] = useState<Resume[]>([]);
@@ -100,6 +131,10 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   const [applicationProfile, setApplicationProfile] = useState<ApplicationProfile>(() =>
     loadStoredApplicationProfile()
   );
+  const [applicationTrackingSummary, setApplicationTrackingSummary] =
+    useState<ApplicationTrackingSummary | null>(null);
+  const [applicationHistory, setApplicationHistory] = useState<TrackedJobApplication[]>([]);
+  const [isApplicationTrackingLoading, setIsApplicationTrackingLoading] = useState<boolean>(false);
 
   const upsertStoredResume = (nextResume: Resume): void => {
     setStoredResumes(currentResumes => {
@@ -136,6 +171,42 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     }
   };
 
+  const loadApplicationTrackingData = async (): Promise<void> => {
+    setIsApplicationTrackingLoading(true);
+    try {
+      const [summary, history] = await Promise.all([
+        fetchApplicationTrackingSummary(),
+        fetchApplicationHistory(50)
+      ]);
+      setApplicationTrackingSummary(summary);
+      setApplicationHistory(history);
+    } catch (error) {
+      console.error('Application tracking loading error:', error);
+    } finally {
+      setIsApplicationTrackingLoading(false);
+    }
+  };
+
+  const hydrateJobsWithTrackedApplications = async (scrapedJobs: Job[]): Promise<Job[]> => {
+    const initialJobs = scrapedJobs.map(job => ({
+      ...job,
+      applicationStatus: job.applicationStatus || 'idle'
+    }));
+
+    try {
+      const trackedApplicationsByUrl = await fetchApplicationStatusesForJobs(
+        initialJobs.map(job => job.url)
+      );
+
+      return initialJobs.map(job =>
+        mergeTrackedApplicationIntoJob(job, trackedApplicationsByUrl.get(normalizeTrackedJobUrl(job.url)))
+      );
+    } catch (error) {
+      console.error('Tracked application lookup error:', error);
+      return initialJobs;
+    }
+  };
+
   useEffect(() => {
     const loadStoredResumes = async (): Promise<void> => {
       setIsStoredResumesLoading(true);
@@ -150,6 +221,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     };
 
     void loadStoredResumes();
+    void loadApplicationTrackingData();
   }, []);
 
   useEffect(() => {
@@ -230,12 +302,14 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
           matchScore: matchScores[job.id] || 0,
           applicationStatus: 'idle' as const
         }));
-        
+
+        const hydratedJobs = await hydrateJobsWithTrackedApplications(jobsWithScores);
+
         // Sort by match score (highest first)
-        jobsWithScores.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
-        setJobs(jobsWithScores);
+        hydratedJobs.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+        setJobs(hydratedJobs);
       } else {
-        setJobs(scrapedJobs.map(job => ({ ...job, applicationStatus: 'idle' as const })));
+        setJobs(await hydrateJobsWithTrackedApplications(scrapedJobs));
       }
       
       setIsLoading(false);
@@ -264,7 +338,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
         location,
         jobSearchAmount
       );
-      setJobs(scrapedJobs);
+      setJobs(await hydrateJobsWithTrackedApplications(scrapedJobs));
       setIsLoading(false);
     } catch (error) {
       setError('Failed to search for jobs');
@@ -298,7 +372,11 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     }
   };
 
-  const applyToJobInternal = async (job: Job, activeResume: Resume): Promise<ApplyRunOutcome> => {
+  const applyToJobInternal = async (
+    job: Job,
+    activeResume: Resume,
+    triggerSource: ApplicationTriggerSource
+  ): Promise<ApplyRunOutcome> => {
     setError(null);
     setJobs(currentJobs =>
       currentJobs.map(currentJob =>
@@ -315,7 +393,8 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     );
 
     try {
-      const result = await autoApplyToJob(job, activeResume, applicationProfile);
+      const result = await autoApplyToJob(job, activeResume, applicationProfile, triggerSource);
+      const updatedAt = new Date().toISOString();
 
       setJobs(currentJobs =>
         currentJobs.map(currentJob =>
@@ -325,11 +404,15 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
                 applicationStatus: result.status,
                 applicationMessage: result.message,
                 applicationLogs: result.logs,
-                applicationArtifacts: result.artifacts
+                applicationArtifacts: result.artifacts,
+                applicationTrackingId: result.trackingId,
+                applicationUpdatedAt: updatedAt
               }
             : currentJob
         )
       );
+
+      await loadApplicationTrackingData();
 
       return {
         shouldStopBatch: result.status === 'failed' && isFatalBatchApplyErrorMessage(result.message),
@@ -346,12 +429,14 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
                 ...currentJob,
                 applicationStatus: 'failed',
                 applicationMessage: message,
-                applicationArtifacts: []
+                applicationArtifacts: [],
+                applicationUpdatedAt: new Date().toISOString()
               }
             : currentJob
         )
       );
       console.error('Auto-apply error:', error);
+      await loadApplicationTrackingData();
 
       return {
         shouldStopBatch: isFatalBatchApplyErrorMessage(message),
@@ -371,7 +456,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       return;
     }
 
-    await applyToJobInternal(job, resume);
+    await applyToJobInternal(job, resume, 'manual');
   };
 
   const autoApplyMatchingJobs = async (): Promise<void> => {
@@ -414,7 +499,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     try {
       for (let index = 0; index < eligibleJobs.length; index += 1) {
         const job = eligibleJobs[index];
-        const outcome = await applyToJobInternal(job, resume);
+        const outcome = await applyToJobInternal(job, resume, 'bulk');
 
         if (outcome.shouldStopBatch) {
           const stopReason = outcome.stopReason || 'Unknown upstream application error';
@@ -490,7 +575,10 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       seekLoginMessage,
       isSeekLoginLoading,
       isStoredResumesLoading,
-      applicationProfile
+      applicationProfile,
+      applicationTrackingSummary,
+      applicationHistory,
+      isApplicationTrackingLoading
     },
     {
       uploadResume,
@@ -503,7 +591,8 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       loginToSeek,
       setLocation: updateLocation,
       setJobSearchAmount,
-      updateApplicationProfile
+      updateApplicationProfile,
+      refreshApplicationTracking: loadApplicationTrackingData
     }
   ];
 };

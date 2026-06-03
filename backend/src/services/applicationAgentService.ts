@@ -177,6 +177,7 @@ interface DecisionExecutionResult {
   page: Page;
   pageChangeMessage?: string;
   nextActiveResume?: ResumeOption;
+  capturedCoverLetterText?: string;
 }
 
 interface BrowserSession {
@@ -191,6 +192,13 @@ export interface ApplicationArtifact {
   url: string;
 }
 
+export interface ApplicationSnapshot {
+  resumeId: string;
+  resumeFileName: string;
+  coverLetterText?: string;
+  coverLetterUsed: boolean;
+}
+
 export interface JobApplicationResult {
   status: 'applied' | 'review_required' | 'failed' | 'skipped';
   message: string;
@@ -198,6 +206,7 @@ export interface JobApplicationResult {
   finalUrl: string;
   steps: number;
   artifacts: ApplicationArtifact[];
+  applicationSnapshot: ApplicationSnapshot;
 }
 
 class ExternalWebsiteBlockedError extends Error {
@@ -415,6 +424,21 @@ const buildCoverLetterText = (job: Job, candidateProfile: CandidateProfile): str
       'I would welcome the opportunity to contribute to your team and discuss how my experience aligns with the role.',
     900
   );
+};
+
+export const buildApplicationSnapshot = (
+  job: Job,
+  resume: Resume,
+  overrides?: Partial<Pick<ApplicationSnapshot, 'coverLetterText' | 'coverLetterUsed'>>
+): ApplicationSnapshot => {
+  const candidateProfile = extractCandidateProfile(resume);
+
+  return {
+    resumeId: resume.id,
+    resumeFileName: resume.fileName,
+    coverLetterText: overrides?.coverLetterText ?? buildCoverLetterText(job, candidateProfile),
+    coverLetterUsed: overrides?.coverLetterUsed ?? false
+  };
 };
 
 const buildCandidateSummaryText = (job: Job, candidateProfile: CandidateProfile): string => {
@@ -2001,6 +2025,7 @@ const executeDecision = async (
       return { executedAction: { action: 'clear', targetId: decision.targetId }, page };
     }
     case 'type': {
+      const fieldKind = inferFieldKind(decision, snapshot);
       const text = resolveAutofillText(
         decision,
         snapshot,
@@ -2031,14 +2056,21 @@ const executeDecision = async (
             targetId: resolvedTargetId || snapshot.activeElementId,
             text
           },
-          page
+          page,
+          capturedCoverLetterText:
+            fieldKind === 'cover_letter' || fieldKind === 'motivation' ? text : undefined
         };
       }
       if (!resolvedTargetId) {
         throw new Error('LLM type action could not resolve an editable target.');
       }
       await typeIntoTarget(page, resolvedTargetId, text, snapshot);
-      return { executedAction: { action: 'type', targetId: resolvedTargetId, text }, page };
+      return {
+        executedAction: { action: 'type', targetId: resolvedTargetId, text },
+        page,
+        capturedCoverLetterText:
+          fieldKind === 'cover_letter' || fieldKind === 'motivation' ? text : undefined
+      };
     }
     case 'select': {
       if (!decision.targetId || !decision.option) {
@@ -2191,6 +2223,7 @@ export const applyToJob = async (
   const logs: string[] = [];
   const artifacts: ApplicationArtifact[] = [];
   let lastSnapshot: PageSnapshot | null = null;
+  let lastCoverLetterText: string | undefined;
 
   try {
     let currentPage = session.page;
@@ -2218,7 +2251,11 @@ export const applyToJob = async (
           logs,
           finalUrl: lastSnapshot.url,
           steps: step,
-          artifacts
+          artifacts,
+          applicationSnapshot: buildApplicationSnapshot(job, activeResumeOption.resume, {
+            coverLetterText: lastCoverLetterText,
+            coverLetterUsed: Boolean(lastCoverLetterText)
+          })
         };
       }
 
@@ -2273,7 +2310,11 @@ export const applyToJob = async (
               logs,
               finalUrl: workingSnapshot.url,
               steps: step,
-              artifacts
+              artifacts,
+              applicationSnapshot: buildApplicationSnapshot(job, activeResumeOption.resume, {
+                coverLetterText: lastCoverLetterText,
+                coverLetterUsed: Boolean(lastCoverLetterText)
+              })
             };
           }
 
@@ -2287,7 +2328,11 @@ export const applyToJob = async (
               logs,
               finalUrl: workingSnapshot.url,
               steps: step,
-              artifacts
+              artifacts,
+              applicationSnapshot: buildApplicationSnapshot(job, activeResumeOption.resume, {
+                coverLetterText: lastCoverLetterText,
+                coverLetterUsed: Boolean(lastCoverLetterText)
+              })
             };
           }
 
@@ -2307,6 +2352,9 @@ export const applyToJob = async (
               `${attemptLabel} resume - using ${activeResumeOption.resumeRef} (${activeResumeOption.resume.fileName})` +
                 `${activeResumeOption.resumeRef !== previousResumeRef ? ' as the active resume.' : '.'}`
             );
+          }
+          if (execution.capturedCoverLetterText) {
+            lastCoverLetterText = execution.capturedCoverLetterText;
           }
           currentPage = execution.page;
           session.page = currentPage;
@@ -2408,7 +2456,11 @@ export const applyToJob = async (
       logs,
       finalUrl: lastSnapshot?.url || job.url,
       steps: MAX_AGENT_STEPS,
-      artifacts
+      artifacts,
+      applicationSnapshot: buildApplicationSnapshot(job, activeResumeOption.resume, {
+        coverLetterText: lastCoverLetterText,
+        coverLetterUsed: Boolean(lastCoverLetterText)
+      })
     };
   } catch (error) {
     const blockedExternalWebsite = isExternalWebsiteBlockedError(error);
@@ -2433,7 +2485,11 @@ export const applyToJob = async (
       logs,
       finalUrl: blockedUrl || lastSnapshot?.url || job.url,
       steps: logs.length,
-      artifacts
+      artifacts,
+      applicationSnapshot: buildApplicationSnapshot(job, activeResumeOption.resume, {
+        coverLetterText: lastCoverLetterText,
+        coverLetterUsed: Boolean(lastCoverLetterText)
+      })
     };
   } finally {
     await session.context.close();

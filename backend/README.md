@@ -1,16 +1,17 @@
 # WebJobFinder Backend
 
-This is the backend server for the WebJobFinder application. It provides APIs for scraping job listings, parsing resumes, and using OpenAI to analyze job matches.
+This is the backend server for the WebJobFinder application. It provides APIs for scraping job listings, parsing resumes, using OpenAI to analyze job matches, and persisting application runs in SQLite.
 
 ## Features
 
 - **Job Scraping**: Scrape job listings from multiple job sites (Seek, Indeed, LinkedIn)
 - **Resume Parsing**: Extract text and information from PDF and DOCX resume files
 - **OpenAI Integration**: Generate job search terms and evaluate job matches based on resume content
+- **Application Tracking**: Store auto-apply attempts and outcomes in SQLite for later progress reporting
 
 ## Prerequisites
 
-- Node.js (v16+)
+- Node.js (v24+ recommended)
 - npm or yarn
 - OpenAI API key (for AI-powered features)
 
@@ -81,6 +82,11 @@ npm start
 - `POST /api/openai/evaluate-job-match` - Evaluate how well a job matches a resume
 - `POST /api/openai/evaluate-job-matches-bulk` - Evaluate multiple jobs with sandboxed LLM calls
 
+### Application Tracking
+- `GET /api/applications/history` - Retrieve recent tracked application runs
+- `GET /api/applications/summary` - Retrieve status counts and daily activity totals
+- `POST /api/applications/statuses` - Retrieve the latest stored status for a list of job URLs
+
 ## Technologies Used
 
 - Express.js
@@ -89,4 +95,10 @@ npm start
 - Cheerio (for HTML parsing)
 - Multer (for file uploads)
 - OpenAI API
-- PDF Parser and DOCX Parser 
+- PDF Parser and DOCX Parser
+- SQLite via Node's built-in `node:sqlite`
+
+## Data Storage
+
+Tracked application data is stored locally in `backend/data/jobfinder.sqlite` by default.
+You can override the database path with `APPLICATION_TRACKING_DB_PATH`.
