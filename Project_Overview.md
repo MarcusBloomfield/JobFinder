@@ -48,9 +48,10 @@
 JobFinder/
 ├── src/                            # Frontend (React + TypeScript)
 │   ├── index.tsx                   # React DOM entry point
-│   ├── App.tsx                     # Root component, layout
+│   ├── App.tsx                     # Root component, hash-routed Search / Profile / Progress pages
 │   ├── components/
 │   │   ├── ResumeUploader.tsx      # Drag-drop file upload
+│   │   ├── ApplicationProfilePanel.tsx # Common application answers page/card
 │   │   ├── SearchTerms.tsx         # Display/edit generated search terms
 │   │   ├── LocationSelector.tsx    # Location picker with presets
 │   │   └── JobList.tsx             # Job cards with match scores

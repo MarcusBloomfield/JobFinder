@@ -9,10 +9,23 @@ import JobList from './components/JobList';
 import useJobSearch from './hooks/useJobSearch';
 import './styles/App.css';
 
-type AppPage = 'search' | 'progress';
+type AppPage = 'search' | 'profile' | 'progress';
 
-const getPageFromHash = (): AppPage =>
-    typeof window !== 'undefined' && window.location.hash === '#/progress' ? 'progress' : 'search';
+const getPageFromHash = (): AppPage => {
+    if (typeof window === 'undefined') {
+        return 'search';
+    }
+
+    if (window.location.hash === '#/profile') {
+        return 'profile';
+    }
+
+    if (window.location.hash === '#/progress') {
+        return 'progress';
+    }
+
+    return 'search';
+};
 
 // Main App component for the Job Finder application, providing the UI and logic integration
 const App: React.FC = () => {
@@ -65,7 +78,7 @@ const App: React.FC = () => {
     }, []);
 
     const navigateToPage = (page: AppPage): void => {
-        const nextHash = page === 'progress' ? '#/progress' : '#/';
+        const nextHash = page === 'profile' ? '#/profile' : page === 'progress' ? '#/progress' : '#/';
         if (window.location.hash !== nextHash) {
             window.location.hash = nextHash;
             return;
@@ -89,6 +102,12 @@ const App: React.FC = () => {
                         Find Jobs
                     </button>
                     <button
+                        className={`app-nav-button ${currentPage === 'profile' ? 'active' : ''}`}
+                        onClick={() => navigateToPage('profile')}
+                    >
+                        Profile
+                    </button>
+                    <button
                         className={`app-nav-button ${currentPage === 'progress' ? 'active' : ''}`}
                         onClick={() => navigateToPage('progress')}
                     >
@@ -109,6 +128,11 @@ const App: React.FC = () => {
                         onUpdateJobDetails={updateTrackedApplicationJobDetails}
                         onUpdateProgressStage={updateTrackedApplicationProgress}
                         onEnrichApplication={enrichTrackedApplication}
+                    />
+                ) : currentPage === 'profile' ? (
+                    <ApplicationProfilePanel
+                        profile={applicationProfile}
+                        onChange={updateApplicationProfile}
                     />
                 ) : (
                     <>
@@ -163,11 +187,6 @@ const App: React.FC = () => {
                                 isStoredResumesLoading={isStoredResumesLoading}
                             />
                         </div>
-
-                        <ApplicationProfilePanel
-                            profile={applicationProfile}
-                            onChange={updateApplicationProfile}
-                        />
 
                         {resume && (
                             <>
