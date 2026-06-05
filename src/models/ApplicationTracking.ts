@@ -11,6 +11,20 @@ export interface ApplicationArtifact {
   url: string;
 }
 
+export interface TailoredResumeSnapshot {
+  id: string;
+  fileName: string;
+  fileType: 'docx';
+  content: string;
+  filePath: string;
+  url: string;
+  sourceResumeId: string;
+  sourceResumeFileName: string;
+  matchKeywords: string[];
+  tailoringNotes: string[];
+  createdAt: string;
+}
+
 export interface TrackedJobApplication {
   id: string;
   jobId: string;
@@ -25,6 +39,10 @@ export interface TrackedJobApplication {
   jobDetails: JobDetails;
   resumeId: string;
   resumeFileName: string;
+  resumeContent: string;
+  resumeIsTailored: boolean;
+  resumeSourceFileName?: string;
+  tailoredResume?: TailoredResumeSnapshot;
   coverLetterText?: string;
   coverLetterUsed: boolean;
   triggerSource: ApplicationTriggerSource;

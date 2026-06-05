@@ -65,6 +65,11 @@ const getApplicationTimestampLabel = (application: TrackedJobApplication): strin
 const getApplicationTimestampValue = (application: TrackedJobApplication): string =>
   application.completedAt || application.createdAt;
 
+const getAppliedResumeLabel = (application: TrackedJobApplication): string =>
+  application.resumeIsTailored
+    ? `${application.resumeFileName} (Generated)`
+    : `${application.resumeFileName} (Original)`;
+
 const shouldEnrichApplication = (application: TrackedJobApplication): boolean =>
   !application.company.trim() ||
   !application.description.trim() ||
@@ -547,7 +552,7 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
                             <p className="application-history-message">{application.message}</p>
                           </div>
                           <div className="application-history-meta">
-                            <span>Resume: {application.resumeFileName}</span>
+                            <span>Resume: {getAppliedResumeLabel(application)}</span>
                             <span>
                               Match at apply:{' '}
                               {typeof application.matchScore === 'number'
@@ -647,7 +652,7 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
               </article>
               <article className="application-detail-card">
                 <span className="application-progress-stat-label">Resume Used</span>
-                <strong>{selectedApplication.resumeFileName}</strong>
+                <strong>{getAppliedResumeLabel(selectedApplication)}</strong>
               </article>
               <article className="application-detail-card">
                 <span className="application-progress-stat-label">Match At Application</span>
@@ -854,6 +859,53 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
                   </button>
                 </div>
               </form>
+            </div>
+
+            <div className="application-detail-cover-letter">
+              <div className="application-progress-subheader">
+                <h4>Generated Resume</h4>
+                <span>
+                  {selectedApplication.tailoredResume
+                    ? `Tailored from ${selectedApplication.tailoredResume.sourceResumeFileName}`
+                    : 'No generated resume was saved for this application'}
+                </span>
+              </div>
+              <div className="application-detail-cover-letter-body">
+                {selectedApplication.tailoredResume ? (
+                  <>
+                    <p>{selectedApplication.tailoredResume.fileName}</p>
+                    <div className="application-history-actions">
+                      <a
+                        href={selectedApplication.tailoredResume.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open Generated Resume
+                      </a>
+                    </div>
+                  </>
+                ) : (
+                  <p>No generated resume snapshot is available for this application.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="application-detail-cover-letter">
+              <div className="application-progress-subheader">
+                <h4>Full Resume Used</h4>
+                <span>
+                  {selectedApplication.resumeIsTailored
+                    ? `Generated from ${selectedApplication.resumeSourceFileName || 'an uploaded resume'}`
+                    : 'Original uploaded resume used for this application'}
+                </span>
+              </div>
+              <div className="application-detail-cover-letter-body">
+                {selectedApplication.resumeContent ? (
+                  <p>{selectedApplication.resumeContent}</p>
+                ) : (
+                  <p>No stored resume snapshot is available for this application.</p>
+                )}
+              </div>
             </div>
 
             <div className="application-detail-cover-letter">

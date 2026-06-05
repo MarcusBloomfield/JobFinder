@@ -84,6 +84,7 @@ JobFinder/
 │   │   │   ├── scrapeService.ts        # Playwright + Cheerio, human-like delays
 │   │   │   ├── geminiService.ts        # Gemini API calls
 │   │   │   ├── llmSandboxService.ts    # Sanitization, rate-limit, retry, fallback
+│   │   │   ├── tailoredResumeService.ts # Creates truthful job-tailored DOCX resumes
 │   │   │   └── openaiService.ts        # Legacy — not actively used
 │   │   ├── models/
 │   │   │   ├── Resume.ts
@@ -165,6 +166,8 @@ JobFinder/
 
 > **Auto-apply cover letters** are generated in `backend/src/services/applicationAgentService.ts` and are intended to stay short, warm, and human-sounding rather than overly formal.
 
+> **Auto-apply tailored resumes** are generated in `backend/src/services/tailoredResumeService.ts` only when auto-apply starts for a job. The generated DOCX file is named with the candidate, company, and role, uses only uploaded resume content plus explicit saved profile details, reorders/prioritizes facts against job keywords, and does not add unsupported credentials, dates, work rights, licences, or employers. `applicationAgentService.ts` makes the generated tailored resume the active upload option and keeps original uploaded resumes available as fallbacks. The tracked application now stores the exact resume used, whether it was generated, the source resume filename, the full resume text snapshot, and the generated DOCX link so both Progress and Profile can show what was actually used for each job.
+
 > **Note:** Models are duplicated across `src/models/` and `backend/src/models/`. Keep them in sync when changing the shape.
 
 ---
@@ -223,6 +226,13 @@ JobFinder/
 - Color coding: ≥80% green, 60–79% yellow, <60% red
 - Clicking a card opens job URL in new tab
 - Visited jobs get visual indicator
+
+### 6. Auto-Apply With Tailored Resume
+- `applyToJob` builds one tailored DOCX resume in the per-job application run directory before browser automation starts.
+- The agent receives the generated tailored resume as `activeResume` plus a `resumeLibrary` that includes original uploaded files. It should upload the tailored resume by default.
+- The generated resume metadata, URL, source resume name, and full final resume text are persisted with the tracked application and shown in the Progress and Profile history views.
+- If an upload field or employer site requires a file type the tailored DOCX cannot satisfy, the agent can switch to a compatible original uploaded resume.
+- Tailoring is deterministic and factual: it can prioritize, reorder, summarize, and name the resume for the job, but it must not invent qualifications or turn job requirements into candidate claims.
 
 ---
 

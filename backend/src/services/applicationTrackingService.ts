@@ -5,6 +5,7 @@ import {
   ApplicationArtifact,
   ApplicationSnapshot,
   JobApplicationResult,
+  TailoredResumeSnapshot,
   buildApplicationSnapshot
 } from './applicationAgentService';
 import { ApplicationProfile } from '../models/ApplicationProfile';
@@ -46,6 +47,10 @@ export interface TrackedJobApplication {
   jobDetails: JobDetails;
   resumeId: string;
   resumeFileName: string;
+  resumeContent: string;
+  resumeIsTailored: boolean;
+  resumeSourceFileName?: string;
+  tailoredResume?: TailoredResumeSnapshot;
   coverLetterText?: string;
   coverLetterUsed: boolean;
   triggerSource: ApplicationTriggerSource;
@@ -100,6 +105,10 @@ interface TrackedApplicationRow {
   job_details_json: string | null;
   resume_id: string;
   resume_file_name: string;
+  resume_content: string | null;
+  resume_is_tailored: number;
+  resume_source_file_name: string | null;
+  tailored_resume_json: string | null;
   cover_letter_text: string | null;
   cover_letter_used: number;
   trigger_source: ApplicationTriggerSource;
@@ -294,6 +303,21 @@ const parseJsonArray = <T>(value: string, fallback: T[]): T[] => {
   }
 };
 
+const parseJsonObject = <T>(value: string | null, fallback: T | undefined): T | undefined => {
+  try {
+    if (!value) {
+      return fallback;
+    }
+
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as T)
+      : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 const parseJobDetails = (value: string | null): JobDetails => {
   try {
     return normalizeJobDetails(value ? JSON.parse(value) : undefined);
@@ -343,6 +367,10 @@ const getDatabase = (): SqliteDatabase => {
       match_score INTEGER,
       resume_id TEXT NOT NULL,
       resume_file_name TEXT NOT NULL,
+      resume_content TEXT,
+      resume_is_tailored INTEGER NOT NULL DEFAULT 0,
+      resume_source_file_name TEXT,
+      tailored_resume_json TEXT,
       application_profile_json TEXT NOT NULL,
       trigger_source TEXT NOT NULL,
       status TEXT NOT NULL,
@@ -383,6 +411,22 @@ const getDatabase = (): SqliteDatabase => {
     database.exec(`ALTER TABLE job_applications ADD COLUMN job_details_json TEXT NOT NULL DEFAULT '{}'`);
   }
 
+  if (!knownColumns.has('tailored_resume_json')) {
+    database.exec(`ALTER TABLE job_applications ADD COLUMN tailored_resume_json TEXT`);
+  }
+
+  if (!knownColumns.has('resume_content')) {
+    database.exec(`ALTER TABLE job_applications ADD COLUMN resume_content TEXT`);
+  }
+
+  if (!knownColumns.has('resume_is_tailored')) {
+    database.exec(`ALTER TABLE job_applications ADD COLUMN resume_is_tailored INTEGER NOT NULL DEFAULT 0`);
+  }
+
+  if (!knownColumns.has('resume_source_file_name')) {
+    database.exec(`ALTER TABLE job_applications ADD COLUMN resume_source_file_name TEXT`);
+  }
+
   return database;
 };
 
@@ -405,6 +449,10 @@ const mapTrackedApplicationRow = (row: TrackedApplicationRow): TrackedJobApplica
   }),
   resumeId: row.resume_id,
   resumeFileName: row.resume_file_name,
+  resumeContent: row.resume_content || '',
+  resumeIsTailored: Boolean(row.resume_is_tailored),
+  resumeSourceFileName: normalizeOptionalText(row.resume_source_file_name),
+  tailoredResume: parseJsonObject<TailoredResumeSnapshot>(row.tailored_resume_json, undefined),
   coverLetterText: normalizeOptionalText(row.cover_letter_text),
   coverLetterUsed: Boolean(row.cover_letter_used),
   triggerSource: row.trigger_source,
@@ -437,6 +485,10 @@ const getLatestTrackedApplicationByNormalizedUrl = (normalizedJobUrl: string): T
           job_details_json,
           resume_id,
           resume_file_name,
+          resume_content,
+          resume_is_tailored,
+          resume_source_file_name,
+          tailored_resume_json,
           cover_letter_text,
           cover_letter_used,
           trigger_source,
@@ -624,6 +676,10 @@ export const createTrackedApplication = (
           job_details_json,
           resume_id,
           resume_file_name,
+          resume_content,
+          resume_is_tailored,
+          resume_source_file_name,
+          tailored_resume_json,
           cover_letter_text,
           cover_letter_used,
           application_profile_json,
@@ -637,7 +693,7 @@ export const createTrackedApplication = (
           created_at,
           updated_at,
           completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     )
     .run(
@@ -655,6 +711,10 @@ export const createTrackedApplication = (
       JSON.stringify(jobDetails),
       applicationSnapshot.resumeId,
       applicationSnapshot.resumeFileName,
+      applicationSnapshot.resumeContent || null,
+      applicationSnapshot.resumeIsTailored ? 1 : 0,
+      applicationSnapshot.resumeSourceFileName || null,
+      applicationSnapshot.tailoredResume ? JSON.stringify(applicationSnapshot.tailoredResume) : null,
       applicationSnapshot.coverLetterText || null,
       applicationSnapshot.coverLetterUsed ? 1 : 0,
       JSON.stringify(applicationProfile || null),
@@ -684,6 +744,10 @@ export const createTrackedApplication = (
     jobDetails,
     resumeId: applicationSnapshot.resumeId,
     resumeFileName: applicationSnapshot.resumeFileName,
+    resumeContent: applicationSnapshot.resumeContent,
+    resumeIsTailored: applicationSnapshot.resumeIsTailored,
+    resumeSourceFileName: applicationSnapshot.resumeSourceFileName,
+    tailoredResume: applicationSnapshot.tailoredResume,
     coverLetterText: applicationSnapshot.coverLetterText,
     coverLetterUsed: applicationSnapshot.coverLetterUsed,
     triggerSource: safeTriggerSource,
@@ -719,6 +783,10 @@ export const finalizeTrackedApplication = (
           steps = ?,
           resume_id = ?,
           resume_file_name = ?,
+          resume_content = ?,
+          resume_is_tailored = ?,
+          resume_source_file_name = ?,
+          tailored_resume_json = ?,
           cover_letter_text = ?,
           cover_letter_used = ?,
           job_details_json = ?,
@@ -736,6 +804,10 @@ export const finalizeTrackedApplication = (
       typeof result.steps === 'number' ? result.steps : 0,
       applicationSnapshot.resumeId,
       applicationSnapshot.resumeFileName,
+      applicationSnapshot.resumeContent || null,
+      applicationSnapshot.resumeIsTailored ? 1 : 0,
+      applicationSnapshot.resumeSourceFileName || null,
+      applicationSnapshot.tailoredResume ? JSON.stringify(applicationSnapshot.tailoredResume) : null,
       applicationSnapshot.coverLetterText || null,
       applicationSnapshot.coverLetterUsed ? 1 : 0,
       JSON.stringify(jobDetails),
@@ -957,6 +1029,10 @@ export const getTrackedApplicationById = (applicationId: string): TrackedJobAppl
           job_details_json,
           resume_id,
           resume_file_name,
+          resume_content,
+          resume_is_tailored,
+          resume_source_file_name,
+          tailored_resume_json,
           cover_letter_text,
           cover_letter_used,
           trigger_source,
@@ -998,6 +1074,10 @@ export const listTrackedApplications = (limit = DEFAULT_HISTORY_LIMIT): TrackedJ
           job_details_json,
           resume_id,
           resume_file_name,
+          resume_content,
+          resume_is_tailored,
+          resume_source_file_name,
+          tailored_resume_json,
           cover_letter_text,
           cover_letter_used,
           trigger_source,
@@ -1038,6 +1118,7 @@ const listAllTrackedApplications = (): TrackedJobApplication[] => {
           job_details_json,
           resume_id,
           resume_file_name,
+          tailored_resume_json,
           cover_letter_text,
           cover_letter_used,
           trigger_source,

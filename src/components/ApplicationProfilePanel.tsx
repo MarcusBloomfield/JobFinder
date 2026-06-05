@@ -1,28 +1,40 @@
 import React from 'react';
 import { ApplicationProfile } from '../models/ApplicationProfile';
+import { TrackedJobApplication } from '../models/ApplicationTracking';
 
 interface ApplicationProfilePanelProps {
   profile: ApplicationProfile;
+  applicationHistory: TrackedJobApplication[];
   onChange: (updates: Partial<ApplicationProfile>) => void;
 }
 
-const ApplicationProfilePanel: React.FC<ApplicationProfilePanelProps> = ({ profile, onChange }) => {
-  return (
-    <section className="application-profile-section">
-      <div className="application-profile-header">
-        <div>
-          <h2>Application Profile</h2>
-          <p className="application-profile-description">
-            Saved locally in this browser and used by auto-apply for contact details, recurring employer
-            questions, profile-style answers, and manual background details you do not want taken
-            from a resume.
-          </p>
-        </div>
-        <span className="application-profile-badge">Auto-saved</span>
-      </div>
+const getAppliedResumeLabel = (application: TrackedJobApplication): string =>
+  application.resumeIsTailored
+    ? `${application.resumeFileName} (Generated)`
+    : `${application.resumeFileName} (Original)`;
 
-      <div className="application-profile-grid">
-        <div className="application-profile-subheading">Contact details</div>
+const ApplicationProfilePanel: React.FC<ApplicationProfilePanelProps> = ({
+  profile,
+  applicationHistory,
+  onChange
+}) => {
+  return (
+    <>
+      <section className="application-profile-section">
+        <div className="application-profile-header">
+          <div>
+            <h2>Application Profile</h2>
+            <p className="application-profile-description">
+              Saved locally in this browser and used by auto-apply for contact details, recurring employer
+              questions, profile-style answers, and manual background details you do not want taken
+              from a resume.
+            </p>
+          </div>
+          <span className="application-profile-badge">Auto-saved</span>
+        </div>
+
+        <div className="application-profile-grid">
+          <div className="application-profile-subheading">Contact details</div>
 
         <label className="application-profile-field">
           <span>Full name</span>
@@ -227,17 +239,66 @@ const ApplicationProfilePanel: React.FC<ApplicationProfilePanelProps> = ({ profi
           />
         </label>
 
-        <label className="application-profile-field application-profile-field-wide">
-          <span>Additional employer question notes</span>
-          <textarea
-            rows={4}
-            placeholder="Anything you answer often, for example police checks, shift availability, notice period, or travel readiness."
-            value={profile.employerQuestionNotes}
-            onChange={(event) => onChange({ employerQuestionNotes: event.target.value })}
-          />
-        </label>
-      </div>
-    </section>
+          <label className="application-profile-field application-profile-field-wide">
+            <span>Additional employer question notes</span>
+            <textarea
+              rows={4}
+              placeholder="Anything you answer often, for example police checks, shift availability, notice period, or travel readiness."
+              value={profile.employerQuestionNotes}
+              onChange={(event) => onChange({ employerQuestionNotes: event.target.value })}
+            />
+          </label>
+        </div>
+      </section>
+
+      <section className="application-profile-section">
+        <div className="application-profile-header">
+          <div>
+            <h2>Application Resume History</h2>
+            <p className="application-profile-description">
+              Exact resume snapshots used for each application run.
+            </p>
+          </div>
+          <span className="application-profile-badge">{applicationHistory.length} jobs</span>
+        </div>
+
+        {applicationHistory.length > 0 ? (
+          <div className="application-profile-history-list">
+            {applicationHistory.map(application => (
+              <details key={application.id} className="application-profile-history-item">
+                <summary className="application-profile-history-summary">
+                  <div>
+                    <strong>{application.title}</strong>
+                    <span>{application.company}</span>
+                  </div>
+                  <span>{getAppliedResumeLabel(application)}</span>
+                </summary>
+                <div className="application-profile-history-body">
+                  <div className="application-profile-history-meta">
+                    <span>
+                      Source resume:{' '}
+                      {application.resumeSourceFileName || application.resumeFileName}
+                    </span>
+                    {application.tailoredResume && (
+                      <a href={application.tailoredResume.url} target="_blank" rel="noreferrer">
+                        Open Generated Resume
+                      </a>
+                    )}
+                  </div>
+                  <div className="application-profile-history-resume">
+                    <p>{application.resumeContent || 'No stored resume snapshot is available.'}</p>
+                  </div>
+                </div>
+              </details>
+            ))}
+          </div>
+        ) : (
+          <p className="application-profile-description">
+            No application resume history yet.
+          </p>
+        )}
+      </section>
+    </>
   );
 };
 

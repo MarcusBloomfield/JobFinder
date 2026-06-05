@@ -132,6 +132,7 @@ const App: React.FC = () => {
                 ) : currentPage === 'profile' ? (
                     <ApplicationProfilePanel
                         profile={applicationProfile}
+                        applicationHistory={applicationHistory}
                         onChange={updateApplicationProfile}
                     />
                 ) : (
