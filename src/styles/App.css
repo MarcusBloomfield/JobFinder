@@ -188,6 +188,21 @@ button:disabled {
   margin-bottom: 0.35rem;
 }
 
+.application-profile-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.application-profile-ai-button {
+  background-color: var(--dark-color);
+}
+
+.application-profile-ai-button:hover:not(:disabled) {
+  background-color: #1f2d3a;
+}
+
 .application-profile-description {
   font-size: 0.95rem;
   color: var(--gray-color);
@@ -203,6 +218,12 @@ button:disabled {
   color: #148f77;
   font-size: 0.8rem;
   font-weight: 600;
+}
+
+.application-profile-fill-message {
+  margin-bottom: 1rem;
+  color: #148f77;
+  font-size: 0.9rem;
 }
 
 .application-profile-grid {

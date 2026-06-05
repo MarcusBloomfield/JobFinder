@@ -5,5 +5,6 @@ const router = express.Router();
 
 router.post('/job', applicationController.applyToJob);
 router.post('/login/seek', applicationController.openSeekLoginBrowser);
+router.post('/profile/fill', applicationController.fillApplicationProfile);
 
 export default router;

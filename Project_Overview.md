@@ -168,6 +168,8 @@ JobFinder/
 
 > **Auto-apply tailored resumes** are generated in `backend/src/services/tailoredResumeService.ts` only when auto-apply starts for a job. The generated DOCX file is named with the candidate, company, and role, uses only uploaded resume content plus explicit saved profile details, reorders/prioritizes facts against job keywords, and does not add unsupported credentials, dates, work rights, licences, or employers. `applicationAgentService.ts` makes the generated tailored resume the active upload option and keeps original uploaded resumes available as fallbacks. The tracked application now stores the exact resume used, whether it was generated, the source resume filename, the full resume text snapshot, and the generated DOCX link so both Progress and Profile can show what was actually used for each job.
 
+> **Profile Fill with AI** is available on the Profile page. It sends stored parsed resumes plus the current browser-saved profile to `POST /api/apply/profile/fill`, where `applicationProfileFillService.ts` asks OpenAI to extract only resume-supported fields and preserve existing profile values unless the resume explicitly replaces them.
+
 > **Note:** Models are duplicated across `src/models/` and `backend/src/models/`. Keep them in sync when changing the shape.
 
 ---
@@ -183,6 +185,7 @@ JobFinder/
 | POST | `/api/openai/generate-search-terms` | Generate search terms from resume via Gemini |
 | POST | `/api/openai/evaluate-job-match` | Single job match evaluation |
 | POST | `/api/openai/evaluate-job-matches-bulk` | Bulk scoring (batched, retried, with fallback) |
+| POST | `/api/apply/profile/fill` | Fill the saved application profile from stored parsed resumes using AI |
 | POST | `/api/applications/:applicationId/enrich` | Refresh missing tracked application metadata from the original listing |
 | PATCH | `/api/applications/:applicationId/job-details` | Save persisted employer/application details for a tracked job |
 

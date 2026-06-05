@@ -47,7 +47,9 @@ const App: React.FC = () => {
             applicationProfile,
             applicationTrackingSummary,
             applicationHistory,
-            isApplicationTrackingLoading
+            isApplicationTrackingLoading,
+            isProfileFillLoading,
+            profileFillMessage
         },
         {
             uploadResume,
@@ -61,6 +63,7 @@ const App: React.FC = () => {
             setLocation,
             setJobSearchAmount,
             updateApplicationProfile,
+            fillApplicationProfileFromResumes,
             refreshApplicationTracking,
             updateTrackedApplicationJobDetails,
             updateTrackedApplicationProgress,
@@ -132,8 +135,12 @@ const App: React.FC = () => {
                 ) : currentPage === 'profile' ? (
                     <ApplicationProfilePanel
                         profile={applicationProfile}
+                        storedResumes={storedResumes}
                         applicationHistory={applicationHistory}
+                        isProfileFillLoading={isProfileFillLoading}
+                        profileFillMessage={profileFillMessage}
                         onChange={updateApplicationProfile}
+                        onFillWithAi={fillApplicationProfileFromResumes}
                     />
                 ) : (
                     <>

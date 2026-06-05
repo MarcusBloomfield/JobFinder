@@ -33,6 +33,12 @@ export interface SeekLoginResult {
   url: string;
 }
 
+export interface ApplicationProfileFillResult {
+  profile: ApplicationProfile;
+  updatedFields: string[];
+  sourceResumeCount: number;
+}
+
 export const applyToJob = async (
   job: Job,
   resume: Resume,
@@ -61,6 +67,22 @@ export const openSeekLoginBrowser = async (): Promise<SeekLoginResult> => {
   }
 
   throw new Error('Invalid response format from Seek login API');
+};
+
+export const fillApplicationProfileWithAi = async (
+  resumes: Resume[],
+  applicationProfile: ApplicationProfile
+): Promise<ApplicationProfileFillResult> => {
+  const response = await axios.post(`${API_URL}/apply/profile/fill`, {
+    resumes,
+    applicationProfile
+  });
+
+  if (response.data && response.data.data) {
+    return response.data.data as ApplicationProfileFillResult;
+  }
+
+  throw new Error('Invalid response format from profile fill API');
 };
 
 const normalizeTrackedJobUrl = (value: string): string => {

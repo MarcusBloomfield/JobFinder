@@ -8,6 +8,7 @@ import {
   WorkRightsStatus
 } from '../models/ApplicationProfile';
 import * as applicationAgentService from '../services/applicationAgentService';
+import * as applicationProfileFillService from '../services/applicationProfileFillService';
 import { scrapeJobListingDetails } from '../services/scrapeService';
 import {
   ApplicationTriggerSource,
@@ -258,6 +259,51 @@ export const openSeekLoginBrowser = async (_req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Error in openSeekLoginBrowser controller:', error);
+    res.status(500).json({
+      error: true,
+      message: error instanceof Error ? error.message : 'An unknown error occurred'
+    });
+  }
+};
+
+export const fillApplicationProfile = async (req: Request, res: Response) => {
+  try {
+    const { resumes, applicationProfile } = req.body;
+
+    if (!Array.isArray(resumes) || resumes.length === 0) {
+      return res.status(400).json({
+        error: true,
+        message: 'Missing required parameter: resumes'
+      });
+    }
+
+    const invalidResumes = resumes.filter(resume => !validateResume(resume));
+    if (invalidResumes.length > 0) {
+      return res.status(400).json({
+        error: true,
+        message: `Invalid resume objects. ${invalidResumes.length} resumes failed validation.`
+      });
+    }
+
+    if (!validateApplicationProfile(applicationProfile) || !applicationProfile) {
+      return res.status(400).json({
+        error: true,
+        message: 'Invalid applicationProfile object.'
+      });
+    }
+
+    const result = await applicationProfileFillService.fillApplicationProfileFromResumes(
+      resumes,
+      applicationProfile
+    );
+
+    res.status(200).json({
+      error: false,
+      message: `Profile filled from ${result.sourceResumeCount} resume(s)`,
+      data: result
+    });
+  } catch (error) {
+    console.error('Error in fillApplicationProfile controller:', error);
     res.status(500).json({
       error: true,
       message: error instanceof Error ? error.message : 'An unknown error occurred'

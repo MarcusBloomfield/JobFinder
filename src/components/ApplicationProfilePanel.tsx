@@ -1,11 +1,16 @@
 import React from 'react';
 import { ApplicationProfile } from '../models/ApplicationProfile';
 import { TrackedJobApplication } from '../models/ApplicationTracking';
+import { Resume } from '../models/Resume';
 
 interface ApplicationProfilePanelProps {
   profile: ApplicationProfile;
+  storedResumes: Resume[];
   applicationHistory: TrackedJobApplication[];
+  isProfileFillLoading: boolean;
+  profileFillMessage: string | null;
   onChange: (updates: Partial<ApplicationProfile>) => void;
+  onFillWithAi: () => Promise<void>;
 }
 
 const getAppliedResumeLabel = (application: TrackedJobApplication): string =>
@@ -15,9 +20,15 @@ const getAppliedResumeLabel = (application: TrackedJobApplication): string =>
 
 const ApplicationProfilePanel: React.FC<ApplicationProfilePanelProps> = ({
   profile,
+  storedResumes,
   applicationHistory,
+  isProfileFillLoading,
+  profileFillMessage,
+  onFillWithAi,
   onChange
 }) => {
+  const canFillWithAi = storedResumes.some(storedResume => storedResume.content.trim());
+
   return (
     <>
       <section className="application-profile-section">
@@ -30,8 +41,20 @@ const ApplicationProfilePanel: React.FC<ApplicationProfilePanelProps> = ({
               from a resume.
             </p>
           </div>
-          <span className="application-profile-badge">Auto-saved</span>
+          <div className="application-profile-header-actions">
+            <button
+              className="application-profile-ai-button"
+              disabled={!canFillWithAi || isProfileFillLoading}
+              onClick={() => void onFillWithAi()}
+            >
+              {isProfileFillLoading ? 'Filling...' : 'Fill with AI'}
+            </button>
+            <span className="application-profile-badge">Auto-saved</span>
+          </div>
         </div>
+        {profileFillMessage && (
+          <p className="application-profile-fill-message">{profileFillMessage}</p>
+        )}
 
         <div className="application-profile-grid">
           <div className="application-profile-subheading">Contact details</div>

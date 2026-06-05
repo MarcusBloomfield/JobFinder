@@ -22,6 +22,7 @@ import {
   fetchApplicationStatusesForJobs,
   fetchApplicationTrackingSummary,
   enrichTrackedApplicationFromListing,
+  fillApplicationProfileWithAi,
   normalizeTrackedJobUrl,
   openSeekLoginBrowser,
   updateTrackedApplicationProgressStage,
@@ -45,6 +46,8 @@ interface JobSearchState {
   applicationTrackingSummary: ApplicationTrackingSummary | null;
   applicationHistory: TrackedJobApplication[];
   isApplicationTrackingLoading: boolean;
+  isProfileFillLoading: boolean;
+  profileFillMessage: string | null;
 }
 
 interface JobSearchActions {
@@ -59,6 +62,7 @@ interface JobSearchActions {
   setLocation: (location: string) => void;
   setJobSearchAmount: (amount: number) => void;
   updateApplicationProfile: (updates: Partial<ApplicationProfile>) => void;
+  fillApplicationProfileFromResumes: () => Promise<void>;
   refreshApplicationTracking: () => Promise<void>;
   updateTrackedApplicationJobDetails: (applicationId: string, jobDetails: JobDetails) => Promise<void>;
   updateTrackedApplicationProgress: (
@@ -150,6 +154,8 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     useState<ApplicationTrackingSummary | null>(null);
   const [applicationHistory, setApplicationHistory] = useState<TrackedJobApplication[]>([]);
   const [isApplicationTrackingLoading, setIsApplicationTrackingLoading] = useState<boolean>(false);
+  const [isProfileFillLoading, setIsProfileFillLoading] = useState<boolean>(false);
+  const [profileFillMessage, setProfileFillMessage] = useState<string | null>(null);
 
   const upsertStoredResume = (nextResume: Resume): void => {
     setStoredResumes(currentResumes => {
@@ -587,6 +593,36 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
         ...updates
       })
     );
+    setProfileFillMessage(null);
+  };
+
+  const fillApplicationProfileFromResumes = async (): Promise<void> => {
+    const resumesWithContent = storedResumes.filter(storedResume => storedResume.content.trim());
+
+    if (resumesWithContent.length === 0) {
+      setError('Upload or select at least one parsed resume before using Fill with AI');
+      return;
+    }
+
+    setIsProfileFillLoading(true);
+    setError(null);
+    setProfileFillMessage(null);
+
+    try {
+      const result = await fillApplicationProfileWithAi(resumesWithContent, applicationProfile);
+      setApplicationProfile(normalizeApplicationProfile(result.profile));
+      setProfileFillMessage(
+        result.updatedFields.length > 0
+          ? `Filled ${result.updatedFields.length} profile field(s) from ${result.sourceResumeCount} resume(s).`
+          : `No new profile fields found in ${result.sourceResumeCount} resume(s).`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to fill profile with AI';
+      setError(message);
+      console.error('Profile fill error:', error);
+    } finally {
+      setIsProfileFillLoading(false);
+    }
   };
 
   const updateTrackedApplicationJobDetails = async (
@@ -645,7 +681,9 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       applicationProfile,
       applicationTrackingSummary,
       applicationHistory,
-      isApplicationTrackingLoading
+      isApplicationTrackingLoading,
+      isProfileFillLoading,
+      profileFillMessage
     },
     {
       uploadResume,
@@ -659,6 +697,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       setLocation: updateLocation,
       setJobSearchAmount,
       updateApplicationProfile,
+      fillApplicationProfileFromResumes,
       refreshApplicationTracking: loadApplicationTrackingData,
       updateTrackedApplicationJobDetails,
       updateTrackedApplicationProgress,
