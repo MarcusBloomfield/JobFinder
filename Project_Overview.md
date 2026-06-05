@@ -163,6 +163,8 @@ JobFinder/
 
 > **Progress stats** now focus on funnel counts the user can maintain from the Progress page: jobs applied for, interviewed for, and employed for.
 
+> **Auto-apply cover letters** are generated in `backend/src/services/applicationAgentService.ts` and are intended to stay short, warm, and human-sounding rather than overly formal.
+
 > **Note:** Models are duplicated across `src/models/` and `backend/src/models/`. Keep them in sync when changing the shape.
 
 ---

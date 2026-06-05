@@ -622,6 +622,8 @@ const buildCoverLetterText = (
 ): string => {
   const manualSkillsDetails = getProfileSkillsDetails(applicationProfile);
   const manualPreviousJobsDetails = getProfilePreviousJobsDetails(applicationProfile);
+  const companyName = normalizeOptionalText(job.company) || 'your team';
+  const roleTitle = normalizeOptionalText(job.title) || 'role';
   const topSkills = candidateProfile.skills.filter(Boolean).slice(0, 4);
   const skillsText =
     manualSkillsDetails
@@ -638,13 +640,18 @@ const buildCoverLetterText = (
         .map(item => compactText(item, 160))
         .join(' ');
   const yearsText = candidateProfile.estimatedCareerYears
-    ? ` with around ${candidateProfile.estimatedCareerYears} years of professional experience`
+    ? ` Over the past ${candidateProfile.estimatedCareerYears} years, I have built hands-on experience in ${skillsText}.`
+    : ` My background is strongest in ${skillsText}.`;
+  const detailText = experienceText
+    ? ` Recent work includes ${experienceText}.`
+    : profileSummary
+    ? ` ${compactText(profileSummary, 220)}`
     : '';
 
   return compactText(
-    `I am applying for the ${job.title} role at ${job.company}.${yearsText} My background includes ${skillsText}. ` +
-      `${experienceText ? `Relevant experience includes ${experienceText}. ` : profileSummary ? `${profileSummary} ` : ''}` +
-      'I would welcome the opportunity to contribute to your team and discuss how my experience aligns with the role.',
+    `The ${roleTitle} role at ${companyName} stood out to me because it matches the kind of work I enjoy most.${yearsText}` +
+      `${detailText} I like working with people, staying practical, and following through on the details. ` +
+      `I would love the chance to bring that approach to ${companyName}.`,
     900
   );
 };
@@ -1933,7 +1940,7 @@ const planNextAction = async (
             'Use page.validationMessages, element.invalid, element.value, and element.selectedOption to correct blocked or prefilled fields before giving up. ' +
             'Treat current input values, selected options, checked states, resume uploads, and cover-letter drafts as editable drafts that must be verified and corrected when inaccurate, generic, or mismatched. ' +
             'If a resume or CV upload field is visible and the application expects one, use upload_resume to attach the most relevant available resume. Prefer switching resumes before answering detailed experience, profile, or motivation questions when that keeps the answers consistent with the uploaded resume. ' +
-            'If a cover-letter or motivation field is visible, write a concise tailored answer grounded in the resume and job description. ' +
+            'If a cover-letter or motivation field is visible, write a concise tailored answer grounded in the resume and job description. Keep it warm, natural, and human in first person. Avoid AI-sounding phrasing, cliches, and stiff corporate language. ' +
             'Use done only when the application is submitted or the page clearly shows a confirmation or only non-essential follow-up remains. ' +
             'Use finalStatus=review_required only for captcha, MFA, legal declarations not supported by the resume, or truly missing personal information that is not already supplied by applicationProfile and cannot be conservatively inferred. ' +
             'If blocked or impossible, use fail with a concise message.'
