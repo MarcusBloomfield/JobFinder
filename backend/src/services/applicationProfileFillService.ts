@@ -7,7 +7,7 @@ import {
 } from '../models/ApplicationProfile';
 import { Resume } from '../models/Resume';
 
-const PROFILE_FILL_MODEL = process.env.PROFILE_FILL_MODEL || 'gpt-4o-mini';
+const PROFILE_FILL_MODEL = process.env.PROFILE_FILL_MODEL || 'gpt-5.4-mini';
 const MAX_RESUMES = Number(process.env.PROFILE_FILL_MAX_RESUMES || 8);
 const MAX_RESUME_CHARS = Number(process.env.PROFILE_FILL_MAX_RESUME_CHARS || 7000);
 
