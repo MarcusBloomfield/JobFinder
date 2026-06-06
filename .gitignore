@@ -55,5 +55,4 @@ logs/
 /backend/.playwright/
 
 # Generated files
-package-lock.json
 yarn.lock 
