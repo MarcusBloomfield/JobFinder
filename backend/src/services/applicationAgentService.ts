@@ -6,6 +6,11 @@ import { ApplicationProfile } from '../models/ApplicationProfile';
 import { Job } from '../models/Job';
 import { Resume } from '../models/Resume';
 import { listStoredResumes } from './resumeParserService';
+import {
+  HumanInterventionReason,
+  createHumanIntervention,
+  waitForHumanInterventionResolution
+} from './humanInterventionService';
 
 const MAX_AGENT_STEPS = Number(process.env.APPLY_AGENT_MAX_STEPS || 25);
 const MAX_STEP_RECOVERY_ATTEMPTS = Number(process.env.APPLY_AGENT_MAX_STEP_RECOVERY_ATTEMPTS || 3);
@@ -2485,6 +2490,88 @@ const captureRunScreenshot = async (
   };
 };
 
+const inferHumanInterventionReason = (message: string): HumanInterventionReason => {
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes('captcha')) {
+    return 'captcha';
+  }
+
+  if (
+    normalized.includes('mfa') ||
+    normalized.includes('multi-factor') ||
+    normalized.includes('two-factor') ||
+    normalized.includes('2fa') ||
+    normalized.includes('verification code')
+  ) {
+    return 'mfa';
+  }
+
+  if (
+    normalized.includes('declaration') ||
+    normalized.includes('terms') ||
+    normalized.includes('consent') ||
+    normalized.includes('legal')
+  ) {
+    return 'unsupported_declaration';
+  }
+
+  if (normalized.includes('missing') || normalized.includes('required')) {
+    return 'missing_information';
+  }
+
+  return 'manual_review';
+};
+
+const waitForReviewRequiredResolution = async (options: {
+  applicationId?: string;
+  job: Job;
+  pageUrl: string;
+  message: string;
+  screenshot?: ApplicationArtifact;
+  step: number;
+  logs: string[];
+}): Promise<'continued' | 'skipped' | 'failed' | 'pending'> => {
+  const intervention = createHumanIntervention({
+    applicationId: options.applicationId,
+    reason: inferHumanInterventionReason(options.message),
+    title: `${options.job.company} - ${options.job.title}`,
+    message: options.message,
+    pageUrl: options.pageUrl,
+    screenshotFilePath: options.screenshot?.filePath,
+    screenshotUrl: options.screenshot?.url,
+    metadata: {
+      jobId: options.job.id,
+      jobTitle: options.job.title,
+      company: options.job.company,
+      jobUrl: options.job.url,
+      step: options.step
+    }
+  });
+
+  options.logs.push(`Human intervention requested: ${intervention.id}`);
+
+  try {
+    const resolution = await waitForHumanInterventionResolution(intervention.id);
+    options.logs.push(`Human intervention resolved: ${resolution.status}`);
+    return resolution.status === 'continued' ||
+      resolution.status === 'skipped' ||
+      resolution.status === 'failed'
+      ? resolution.status
+      : 'pending';
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Human intervention wait failed.';
+    options.logs.push(`Human intervention unresolved: ${message}`);
+    return 'pending';
+  }
+};
+
+const buildContinuationInstruction = (message: string): string =>
+  compactText(
+    `The user selected Continue Bot after this review stop: ${message}. Continue from the current page using the supplied resume/profile data. Only request review again if a new blocker is truly impossible to answer or complete.`,
+    700
+  );
+
 const getElementComparableValue = (element: PageElementSnapshot | undefined): string => {
   if (!element) {
     return '';
@@ -2857,7 +2944,8 @@ const executeDecision = async (
 export const applyToJob = async (
   job: Job,
   resume: Resume,
-  applicationProfile?: ApplicationProfile
+  applicationProfile?: ApplicationProfile,
+  applicationId?: string
 ): Promise<JobApplicationResult> => {
   const runArtifactsDir = createRunArtifactsDir(job);
   const availableResumeOptionsResult = await buildAvailableResumeOptions(
@@ -2879,6 +2967,7 @@ export const applyToJob = async (
   const artifacts: ApplicationArtifact[] = [];
   let lastSnapshot: PageSnapshot | null = null;
   let lastCoverLetterText: string | undefined;
+  let humanContinuationInstruction: string | undefined;
 
   try {
     let currentPage = session.page;
@@ -2927,6 +3016,9 @@ export const applyToJob = async (
         const attemptLabel = attempt === 1 ? `Step ${step}` : `Step ${step} attempt ${attempt}`;
 
         try {
+          const combinedExtraInstruction = [humanContinuationInstruction, stepExtraInstruction]
+            .filter(Boolean)
+            .join(' ');
           let decision = await planNextAction(
             job,
             activeResumeOption,
@@ -2934,7 +3026,7 @@ export const applyToJob = async (
             applicationProfile,
             workingSnapshot,
             logs,
-            stepExtraInstruction,
+            combinedExtraInstruction || undefined,
             attemptFeedback
           );
 
@@ -2950,7 +3042,7 @@ export const applyToJob = async (
               applicationProfile,
               workingSnapshot,
               logs,
-              stepExtraInstruction,
+              [humanContinuationInstruction, stepExtraInstruction].filter(Boolean).join(' ') || undefined,
               attemptFeedback
             );
           }
@@ -2960,11 +3052,68 @@ export const applyToJob = async (
           );
 
           if (decision.action === 'done') {
-            artifacts.push(
-              await captureRunScreenshot(currentPage, runArtifactsDir, step, `step-${step}-attempt-${attempt}-done`)
+            const doneArtifact = await captureRunScreenshot(
+              currentPage,
+              runArtifactsDir,
+              step,
+              `step-${step}-attempt-${attempt}-done`
             );
+            artifacts.push(doneArtifact);
+
+            if ((decision.finalStatus || 'review_required') === 'review_required') {
+              const reviewMessage = decision.message || 'Application flow requires user review.';
+              const resolution = await waitForReviewRequiredResolution({
+                applicationId,
+                job,
+                pageUrl: workingSnapshot.url,
+                message: reviewMessage,
+                screenshot: doneArtifact,
+                step,
+                logs
+              });
+
+              if (resolution === 'continued') {
+                humanContinuationInstruction = buildContinuationInstruction(reviewMessage);
+                workingSnapshot = await capturePageSnapshot(currentPage);
+                lastSnapshot = workingSnapshot;
+                stepCompleted = true;
+                break;
+              }
+
+              if (resolution === 'skipped' || resolution === 'failed') {
+                return {
+                  status: resolution,
+                  message:
+                    resolution === 'skipped'
+                      ? 'Application skipped after human intervention.'
+                      : 'Application marked failed after human intervention.',
+                  logs,
+                  finalUrl: workingSnapshot.url,
+                  steps: step,
+                  artifacts,
+                  applicationSnapshot: buildApplicationSnapshotFromOption(job, activeResumeOption, {
+                    coverLetterText: lastCoverLetterText,
+                    coverLetterUsed: Boolean(lastCoverLetterText)
+                  })
+                };
+              }
+
+              return {
+                status: 'review_required',
+                message: reviewMessage,
+                logs,
+                finalUrl: workingSnapshot.url,
+                steps: step,
+                artifacts,
+                applicationSnapshot: buildApplicationSnapshotFromOption(job, activeResumeOption, {
+                  coverLetterText: lastCoverLetterText,
+                  coverLetterUsed: Boolean(lastCoverLetterText)
+                })
+              };
+            }
+
             return {
-              status: decision.finalStatus || 'review_required',
+              status: 'applied',
               message: decision.message || 'Application flow reached a stopping point.',
               logs,
               finalUrl: workingSnapshot.url,
@@ -3039,6 +3188,7 @@ export const applyToJob = async (
           lastSnapshot = postActionSnapshot;
 
           if (verification.success) {
+            humanContinuationInstruction = undefined;
             stepCompleted = true;
             break;
           }

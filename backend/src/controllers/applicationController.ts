@@ -211,7 +211,8 @@ export const applyToJob = async (req: Request, res: Response) => {
     const result = await applicationAgentService.applyToJob(
       hydratedJob,
       resume,
-      applicationProfile
+      applicationProfile,
+      trackedApplication.id
     );
     const finalizedApplication = finalizeTrackedApplication(trackedApplication.id, result);
 

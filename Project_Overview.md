@@ -167,6 +167,8 @@ JobFinder/
 
 > **Auto-apply resumes** are selected from user-uploaded resumes only. `applicationAgentService.ts` ranks the active resume plus stored uploaded resumes by job relevance and uses the best original upload as the active resume. No tailored/generated resume file is created for auto-apply. The tracked application stores the exact uploaded resume filename and full resume text snapshot so Progress and Profile can show what was actually used for each job.
 
+> **Human intervention** is wired through SQLite-backed `/api/interventions/*` routes and the Progress page panel. When the apply agent reaches a review-required stop, it creates a pending intervention, keeps the browser session open, and resumes/skips/fails based on the user action.
+
 > **Profile Fill with AI** is available on the Profile page. It sends stored parsed resumes plus the current browser-saved profile to `POST /api/apply/profile/fill`, where `applicationProfileFillService.ts` asks OpenAI to extract only resume-supported fields and preserve existing profile values unless the resume explicitly replaces them.
 
 > **Note:** Models are duplicated across `src/models/` and `backend/src/models/`. Keep them in sync when changing the shape.
@@ -187,6 +189,10 @@ JobFinder/
 | POST | `/api/apply/profile/fill` | Fill the saved application profile from stored parsed resumes using AI |
 | POST | `/api/applications/:applicationId/enrich` | Refresh missing tracked application metadata from the original listing |
 | PATCH | `/api/applications/:applicationId/job-details` | Save persisted employer/application details for a tracked job |
+| GET | `/api/interventions/pending` | List pending auto-apply handoffs for the Progress page |
+| POST | `/api/interventions/:id/continue` | Resume a paused auto-apply run |
+| POST | `/api/interventions/:id/skip` | Skip a paused auto-apply run |
+| POST | `/api/interventions/:id/fail` | Mark a paused auto-apply run failed |
 
 ---
 
@@ -235,6 +241,7 @@ JobFinder/
 - Resume uploads use only original user-uploaded files.
 - The selected uploaded resume filename and full text snapshot are persisted with the tracked application and shown in the Progress and Profile history views.
 - The agent can switch to another uploaded resume when it is materially more relevant for the role.
+- Review-required stops create human intervention records and wait for Continue Bot, Skip Application, or Mark Failed from the Progress page.
 
 ---
 
