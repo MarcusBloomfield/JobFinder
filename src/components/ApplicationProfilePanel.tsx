@@ -14,9 +14,7 @@ interface ApplicationProfilePanelProps {
 }
 
 const getAppliedResumeLabel = (application: TrackedJobApplication): string =>
-  application.resumeIsTailored
-    ? `${application.resumeFileName} (Generated)`
-    : `${application.resumeFileName} (Original)`;
+  `${application.resumeFileName} (Uploaded)`;
 
 const ApplicationProfilePanel: React.FC<ApplicationProfilePanelProps> = ({
   profile,
@@ -299,14 +297,9 @@ const ApplicationProfilePanel: React.FC<ApplicationProfilePanelProps> = ({
                 <div className="application-profile-history-body">
                   <div className="application-profile-history-meta">
                     <span>
-                      Source resume:{' '}
+                      Uploaded resume:{' '}
                       {application.resumeSourceFileName || application.resumeFileName}
                     </span>
-                    {application.tailoredResume && (
-                      <a href={application.tailoredResume.url} target="_blank" rel="noreferrer">
-                        Open Generated Resume
-                      </a>
-                    )}
                   </div>
                   <div className="application-profile-history-resume">
                     <p>{application.resumeContent || 'No stored resume snapshot is available.'}</p>

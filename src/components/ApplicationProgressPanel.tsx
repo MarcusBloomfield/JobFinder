@@ -67,9 +67,7 @@ const getApplicationTimestampValue = (application: TrackedJobApplication): strin
   application.completedAt || application.createdAt;
 
 const getAppliedResumeLabel = (application: TrackedJobApplication): string =>
-  application.resumeIsTailored
-    ? `${application.resumeFileName} (Generated)`
-    : `${application.resumeFileName} (Original)`;
+  `${application.resumeFileName} (Uploaded)`;
 
 const shouldEnrichApplication = (application: TrackedJobApplication): boolean =>
   !application.company.trim() ||
@@ -866,40 +864,9 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
 
             <div className="application-detail-cover-letter">
               <div className="application-progress-subheader">
-                <h4>Generated Resume</h4>
-                <span>
-                  {selectedApplication.tailoredResume
-                    ? `Tailored from ${selectedApplication.tailoredResume.sourceResumeFileName}`
-                    : 'No generated resume was saved for this application'}
-                </span>
-              </div>
-              <div className="application-detail-cover-letter-body">
-                {selectedApplication.tailoredResume ? (
-                  <>
-                    <p>{selectedApplication.tailoredResume.fileName}</p>
-                    <div className="application-history-actions">
-                      <a
-                        href={selectedApplication.tailoredResume.url}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Open Generated Resume
-                      </a>
-                    </div>
-                  </>
-                ) : (
-                  <p>No generated resume snapshot is available for this application.</p>
-                )}
-              </div>
-            </div>
-
-            <div className="application-detail-cover-letter">
-              <div className="application-progress-subheader">
                 <h4>Full Resume Used</h4>
                 <span>
-                  {selectedApplication.resumeIsTailored
-                    ? `Generated from ${selectedApplication.resumeSourceFileName || 'an uploaded resume'}`
-                    : 'Original uploaded resume used for this application'}
+                  Most relevant uploaded resume used for this application
                 </span>
               </div>
               <div className="application-detail-cover-letter-body">

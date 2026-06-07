@@ -6,11 +6,6 @@ import { ApplicationProfile } from '../models/ApplicationProfile';
 import { Job } from '../models/Job';
 import { Resume } from '../models/Resume';
 import { listStoredResumes } from './resumeParserService';
-import {
-  TailoredResumeResult,
-  createTailoredResumeForJob,
-  scoreResumeForJob
-} from './tailoredResumeService';
 
 const MAX_AGENT_STEPS = Number(process.env.APPLY_AGENT_MAX_STEPS || 25);
 const MAX_STEP_RECOVERY_ATTEMPTS = Number(process.env.APPLY_AGENT_MAX_STEP_RECOVERY_ATTEMPTS || 3);
@@ -34,6 +29,68 @@ const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 const PHONE_PATTERN = /\b(?:\+?\d[\d()\-\s]{7,}\d)\b/;
 const URL_PATTERN = /\bhttps?:\/\/[^\s]+/gi;
 const YEAR_PATTERN = /\b(?:19|20)\d{2}\b/g;
+const RESUME_SCORING_STOP_WORDS = new Set([
+  'about',
+  'above',
+  'across',
+  'after',
+  'again',
+  'also',
+  'and',
+  'any',
+  'are',
+  'around',
+  'based',
+  'because',
+  'been',
+  'being',
+  'benefits',
+  'between',
+  'both',
+  'can',
+  'candidate',
+  'company',
+  'day',
+  'days',
+  'description',
+  'detail',
+  'duties',
+  'each',
+  'employee',
+  'employer',
+  'from',
+  'full',
+  'have',
+  'hours',
+  'into',
+  'job',
+  'key',
+  'looking',
+  'make',
+  'need',
+  'new',
+  'our',
+  'part',
+  'people',
+  'position',
+  'required',
+  'requirements',
+  'responsibilities',
+  'role',
+  'team',
+  'that',
+  'the',
+  'their',
+  'this',
+  'time',
+  'was',
+  'will',
+  'with',
+  'work',
+  'working',
+  'you',
+  'your'
+]);
 const FORCE_CONTINUE_REVIEW_PATTERN =
   /year|experience|prefill|framework|language|selection|cover letter|resume|question|answer|skill|stack|technology/i;
 const COMMON_APPLICATION_PROFILE_REVIEW_PATTERN =
@@ -68,10 +125,6 @@ interface ResumeLibraryEntry {
   fileName: string;
   fileType: Resume['fileType'];
   uploadedAt?: string;
-  isTailored?: boolean;
-  sourceResumeFileName?: string;
-  matchKeywords?: string[];
-  tailoringNotes?: string[];
   skills: string[];
   experienceHighlights: string[];
   educationHighlights: string[];
@@ -85,27 +138,15 @@ interface ResumeOption {
   candidateProfile: CandidateProfile;
   filePath: string;
   promptEntry: ResumeLibraryEntry;
-  generatedResume?: TailoredResumeSnapshot;
-  isTailored?: boolean;
-  sourceResumeFileName?: string;
-  matchKeywords?: string[];
-  tailoringNotes?: string[];
-  relevanceScore?: number;
 }
 
 interface ResumeOptionBuildOptions {
   filePath?: string;
-  generatedResume?: TailoredResumeSnapshot;
-  isTailored?: boolean;
-  sourceResumeFileName?: string;
-  matchKeywords?: string[];
-  tailoringNotes?: string[];
-  relevanceScore?: number;
 }
 
 interface AvailableResumeOptionsResult {
   options: ResumeOption[];
-  tailoringLogs: string[];
+  selectionLogs: string[];
 }
 
 interface PageElementSnapshot {
@@ -342,6 +383,59 @@ const waitWithTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promi
 
 const compactText = (value: string, maxLength: number): string =>
   value.replace(/\s+/g, ' ').trim().slice(0, maxLength);
+
+const tokenizeResumeScoringText = (value: string): string[] =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9+#.]+/g, ' ')
+    .split(/\s+/)
+    .map(token => token.trim())
+    .filter(token => token.length >= 3 && !RESUME_SCORING_STOP_WORDS.has(token));
+
+const extractJobKeywords = (job: Job): string[] => {
+  const titleTokens = tokenizeResumeScoringText(job.title);
+  const tokenCounts = new Map<string, number>();
+
+  tokenizeResumeScoringText(`${job.title} ${job.company} ${job.description}`).forEach(token => {
+    const titleBoost = titleTokens.includes(token) ? 3 : 0;
+    tokenCounts.set(token, (tokenCounts.get(token) || 0) + 1 + titleBoost);
+  });
+
+  return Array.from(tokenCounts.entries())
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([token]) => token)
+    .slice(0, 45);
+};
+
+const scoreTextAgainstKeywords = (value: string, keywords: string[]): number => {
+  const normalized = value.toLowerCase();
+  return keywords.reduce((score, keyword) => {
+    if (!normalized.includes(keyword)) {
+      return score;
+    }
+
+    return score + (keyword.length > 6 ? 2 : 1);
+  }, 0);
+};
+
+const scoreResumeForJob = (
+  resume: Resume,
+  job: Job,
+  applicationProfile?: ApplicationProfile
+): number => {
+  const keywords = extractJobKeywords(job);
+  const profileText = [
+    applicationProfile?.professionalSummary,
+    applicationProfile?.skillsDetails,
+    applicationProfile?.previousJobsDetails,
+    applicationProfile?.educationDetails,
+    applicationProfile?.employerQuestionNotes
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return scoreTextAgainstKeywords(`${resume.content} ${profileText}`, keywords);
+};
 
 const normalizeComparable = (value: string): string =>
   value
@@ -726,12 +820,7 @@ const buildApplicationSnapshotFromOption = (
   job: Job,
   resumeOption: ResumeOption,
   overrides?: Partial<Pick<ApplicationSnapshot, 'coverLetterText' | 'coverLetterUsed'>>
-): ApplicationSnapshot => ({
-  ...buildApplicationSnapshot(job, resumeOption.resume, overrides),
-  resumeIsTailored: Boolean(resumeOption.isTailored),
-  resumeSourceFileName: resumeOption.sourceResumeFileName || resumeOption.resume.fileName,
-  tailoredResume: resumeOption.generatedResume
-});
+): ApplicationSnapshot => buildApplicationSnapshot(job, resumeOption.resume, overrides);
 
 const buildCandidateSummaryText = (
   job: Job,
@@ -813,17 +902,12 @@ const extractCandidateProfile = (resume: Resume): CandidateProfile => {
 const buildResumePromptEntry = (
   resume: Resume,
   candidateProfile: CandidateProfile,
-  resumeRef: string,
-  options?: ResumeOptionBuildOptions
+  resumeRef: string
 ): ResumeLibraryEntry => ({
   resumeRef,
   fileName: resume.fileName,
   fileType: resume.fileType,
   uploadedAt: resume.uploadedAt,
-  isTailored: options?.isTailored,
-  sourceResumeFileName: options?.sourceResumeFileName,
-  matchKeywords: options?.matchKeywords,
-  tailoringNotes: options?.tailoringNotes,
   skills: candidateProfile.skills.slice(0, 10),
   experienceHighlights: candidateProfile.experienceHighlights.slice(0, 6),
   educationHighlights: candidateProfile.educationHighlights.slice(0, 4),
@@ -842,13 +926,7 @@ const buildResumeOption = (
     resume,
     candidateProfile,
     filePath: options?.filePath || resolveResumeFilePath(resume),
-    promptEntry: buildResumePromptEntry(resume, candidateProfile, resumeRef, options),
-    generatedResume: options?.generatedResume,
-    isTailored: options?.isTailored,
-    sourceResumeFileName: options?.sourceResumeFileName,
-    matchKeywords: options?.matchKeywords,
-    tailoringNotes: options?.tailoringNotes,
-    relevanceScore: options?.relevanceScore
+    promptEntry: buildResumePromptEntry(resume, candidateProfile, resumeRef)
   };
 };
 
@@ -872,39 +950,12 @@ const buildSourceResumeOptions = (primaryResume: Resume): Resume[] => {
     .slice(0, 6);
 };
 
-const buildTailoredResumeOption = (
-  result: TailoredResumeResult,
-  resumeRef: string
-): ResumeOption =>
-  buildResumeOption(result.resume, resumeRef, {
-    filePath: result.filePath,
-    generatedResume: {
-      id: result.resume.id,
-      fileName: result.resume.fileName,
-      fileType: 'docx',
-      content: result.resume.content,
-      filePath: result.filePath,
-      url: toArtifactUrl(result.filePath),
-      sourceResumeId: result.sourceResumeId,
-      sourceResumeFileName: result.sourceResumeFileName,
-      matchKeywords: result.matchKeywords,
-      tailoringNotes: result.tailoringNotes,
-      createdAt: result.resume.uploadedAt || new Date().toISOString()
-    },
-    isTailored: true,
-    sourceResumeFileName: result.sourceResumeFileName,
-    matchKeywords: result.matchKeywords,
-    tailoringNotes: result.tailoringNotes,
-    relevanceScore: result.relevanceScore
-  });
-
 const buildAvailableResumeOptions = async (
   job: Job,
   primaryResume: Resume,
-  applicationProfile: ApplicationProfile | undefined,
-  runArtifactsDir: string
+  applicationProfile: ApplicationProfile | undefined
 ): Promise<AvailableResumeOptionsResult> => {
-  const tailoringLogs: string[] = [];
+  const selectionLogs: string[] = [];
   const sourceResumes = [primaryResume, ...buildSourceResumeOptions(primaryResume)]
     .map((resume, index) => ({
       resume,
@@ -913,48 +964,26 @@ const buildAvailableResumeOptions = async (
     }))
     .sort((left, right) => right.score - left.score || left.originalIndex - right.originalIndex)
     .map(entry => entry.resume);
-  const tailoredResumeDirectory = path.join(runArtifactsDir, 'tailored-resumes');
-  const tailoredResults: TailoredResumeResult[] = [];
 
-  const bestSourceResume = sourceResumes[0];
-  if (bestSourceResume) {
-    try {
-      const tailoredResult = await createTailoredResumeForJob(
-        job,
-        bestSourceResume,
-        applicationProfile,
-        tailoredResumeDirectory
-      );
-      tailoredResults.push(tailoredResult);
-      tailoringLogs.push(
-        `Altered resume "${tailoredResult.sourceResumeFileName}" into "${tailoredResult.resume.fileName}" for ${job.company} - ${job.title}.`
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown tailoring error';
-      tailoringLogs.push(`Could not create a tailored resume from "${bestSourceResume.fileName}": ${message}`);
-    }
-  }
-
-  const tailoredOptions = tailoredResults
-    .sort((left, right) => right.relevanceScore - left.relevanceScore)
-    .map((tailoredResult, index) => buildTailoredResumeOption(tailoredResult, `tailored_${index + 1}`));
   const originalOptions: ResumeOption[] = [];
   sourceResumes.forEach((sourceResume, index) => {
     try {
-      originalOptions.push(
-        buildResumeOption(sourceResume, `resume_${index + 1}`, {
-          relevanceScore: scoreResumeForJob(sourceResume, job, applicationProfile)
-        })
-      );
+      originalOptions.push(buildResumeOption(sourceResume, `resume_${index + 1}`));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown resume file error';
-      tailoringLogs.push(`Uploaded original "${sourceResume.fileName}" is not directly uploadable: ${message}`);
+      selectionLogs.push(`Uploaded resume "${sourceResume.fileName}" is not directly uploadable: ${message}`);
     }
   });
 
+  if (originalOptions.length > 0) {
+    selectionLogs.push(
+      `Selected uploaded resume "${originalOptions[0].resume.fileName}" as the most relevant resume for ${job.company} - ${job.title}.`
+    );
+  }
+
   return {
-    options: [...tailoredOptions, ...originalOptions],
-    tailoringLogs
+    options: originalOptions,
+    selectionLogs
   };
 };
 
@@ -2076,8 +2105,8 @@ const planNextAction = async (
             'Do not invent qualifications, salary expectations, or sponsorship answers. ' +
             'Use applicationProfile for explicit user-provided contact details, links, location, notice period, availability, professional summary, manual skills, previous jobs, education details, common employer questions, car access, and recurring screening notes. If applicationProfile contains the needed answer, continue the application instead of stopping for review. ' +
             'If a required employer question asks for years of experience or skill exposure, infer a conservative estimate from the resume evidence and choose the lowest supported answer rather than stopping. ' +
-            'Use activeResume as the current primary source of truth. You may use resumeLibrary only as alternative stored resumes that you can switch to later, and you must not merge contradictory claims across resumes. ' +
-            'Tailored resumes are altered versions of one uploaded resume plus explicit applicationProfile facts, not resumes generated from the ground up. Prefer the most relevant tailored resume for upload, but never treat job requirements, target-role lines, or promoted source lines as proof the candidate has a skill beyond the underlying resume/profile evidence. If a page only accepts a file type the tailored DOCX cannot satisfy, switch to the most relevant compatible uploaded original resume. ' +
+            'Use activeResume as the current primary source of truth. It is the most relevant uploaded resume for this job. You may use resumeLibrary only as alternative stored uploaded resumes that you can switch to later, and you must not merge contradictory claims across resumes. ' +
+            'Do not create or ask for a generated resume. Use only uploaded resume files for resume/CV uploads. ' +
             'If one of the alternative resumes is materially more relevant for this specific role, switch to it by using upload_resume with both targetId and that resumeRef. After you upload a different resume, keep later answers consistent with that uploaded resume. ' +
             'Prefer concise professional answers. ' +
             'You have a Playwright-backed browser toolset, not raw code execution. ' +
@@ -2097,7 +2126,7 @@ const planNextAction = async (
             'If attemptFeedback is provided, correct that exact failure and choose a different valid action when repeating the same action would be ineffective. ' +
             'Use page.validationMessages, element.invalid, element.value, and element.selectedOption to correct blocked or prefilled fields before giving up. ' +
             'Treat current input values, selected options, checked states, resume uploads, and cover-letter drafts as editable drafts that must be verified and corrected when inaccurate, generic, or mismatched. ' +
-            'If a resume or CV upload field is visible and the application expects one, use upload_resume to attach the most relevant available resume. When activeResume.isTailored=true, upload it unless the page clearly shows that exact tailored file is already attached or the field cannot accept DOCX. Prefer switching resumes before answering detailed experience, profile, or motivation questions when that keeps the answers consistent with the uploaded resume. ' +
+            'If a resume or CV upload field is visible and the application expects one, use upload_resume to attach the most relevant available uploaded resume. Prefer switching resumes before answering detailed experience, profile, or motivation questions when that keeps the answers consistent with the uploaded resume. ' +
             'If a cover-letter or motivation field is visible, write a concise tailored answer grounded in the resume and job description. Keep it warm, natural, and human in first person. Avoid AI-sounding phrasing, cliches, and stiff corporate language. ' +
             'Use done only when the application is submitted or the page clearly shows a confirmation or only non-essential follow-up remains. ' +
             'Use finalStatus=review_required only for captcha, MFA, legal declarations not supported by the resume, or truly missing personal information that is not already supplied by applicationProfile and cannot be conservatively inferred. ' +
@@ -2814,12 +2843,11 @@ export const applyToJob = async (
   const availableResumeOptionsResult = await buildAvailableResumeOptions(
     job,
     resume,
-    applicationProfile,
-    runArtifactsDir
+    applicationProfile
   );
   const availableResumeOptions = availableResumeOptionsResult.options;
   if (availableResumeOptions.length === 0) {
-    throw new Error('No uploaded or tailored resume file is available for auto-apply.');
+    throw new Error('No uploaded resume file is available for auto-apply.');
   }
   const availableResumeOptionsByRef = new Map(
     availableResumeOptions.map(option => [option.resumeRef.toLowerCase(), option] as const)
@@ -2834,13 +2862,11 @@ export const applyToJob = async (
 
   try {
     let currentPage = session.page;
-    logs.push(...availableResumeOptionsResult.tailoringLogs);
+    logs.push(...availableResumeOptionsResult.selectionLogs);
     logs.push(
       `Available resumes: ${availableResumeOptions
         .map(option => {
-          const optionLabel = option.isTailored
-            ? `${option.resumeRef}=${option.resume.fileName} (tailored from ${option.sourceResumeFileName || 'uploaded resume'})`
-            : `${option.resumeRef}=${option.resume.fileName}`;
+          const optionLabel = `${option.resumeRef}=${option.resume.fileName}`;
           return `${optionLabel}${option.resumeRef === activeResumeOption.resumeRef ? ' (active)' : ''}`;
         })
         .join('; ')}`
