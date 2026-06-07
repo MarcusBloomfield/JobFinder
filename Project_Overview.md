@@ -163,7 +163,7 @@ JobFinder/
 
 > **Progress stats** now focus on funnel counts the user can maintain from the Progress page: jobs applied for, interviewed for, and employed for.
 
-> **Auto-apply cover letters** are generated in `backend/src/services/applicationAgentService.ts` and are intended to stay short, warm, and human-sounding rather than overly formal.
+> **Auto-apply cover letters** are generated in `backend/src/services/applicationAgentService.ts`, kept short/warm, and passed through deterministic text cleanup that replaces AI-looking punctuation such as em dashes and strips invisible formatting characters before typing or tracking.
 
 > **Auto-apply resumes** are selected from user-uploaded resumes only. `applicationAgentService.ts` ranks the active resume plus stored uploaded resumes by job relevance and uses the best original upload as the active resume. No tailored/generated resume file is created for auto-apply. The tracked application stores the exact uploaded resume filename and full resume text snapshot so Progress and Profile can show what was actually used for each job.
 

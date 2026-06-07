@@ -384,6 +384,25 @@ const waitWithTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promi
 const compactText = (value: string, maxLength: number): string =>
   value.replace(/\s+/g, ' ').trim().slice(0, maxLength);
 
+const normalizeCoverLetterText = (value: string): string => {
+  const normalized = value.normalize('NFKC');
+  const asciiPunctuation = normalized
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
+    .replace(/[\u2018\u2019\u201A\u201B\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"')
+    .replace(/\u2026/g, '...')
+    .replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g, ' ');
+  const withoutInvisible = asciiPunctuation.replace(
+    /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0]/g,
+    ''
+  );
+
+  return compactText(withoutInvisible, 900);
+};
+
+const isCoverLetterFieldKind = (fieldKind: string): boolean =>
+  fieldKind === 'cover_letter' || fieldKind === 'motivation';
+
 const tokenizeResumeScoringText = (value: string): string[] =>
   value
     .toLowerCase()
@@ -790,11 +809,10 @@ const buildCoverLetterText = (
     ? ` ${compactText(profileSummary, 220)}`
     : '';
 
-  return compactText(
+  return normalizeCoverLetterText(
     `The ${roleTitle} role at ${companyName} stood out to me because it matches the kind of work I enjoy most.${yearsText}` +
       `${detailText} I like working with people, staying practical, and following through on the details. ` +
-      `I would love the chance to bring that approach to ${companyName}.`,
-    900
+      `I would love the chance to bring that approach to ${companyName}.`
   );
 };
 
@@ -2127,7 +2145,7 @@ const planNextAction = async (
             'Use page.validationMessages, element.invalid, element.value, and element.selectedOption to correct blocked or prefilled fields before giving up. ' +
             'Treat current input values, selected options, checked states, resume uploads, and cover-letter drafts as editable drafts that must be verified and corrected when inaccurate, generic, or mismatched. ' +
             'If a resume or CV upload field is visible and the application expects one, use upload_resume to attach the most relevant available uploaded resume. Prefer switching resumes before answering detailed experience, profile, or motivation questions when that keeps the answers consistent with the uploaded resume. ' +
-            'If a cover-letter or motivation field is visible, write a concise tailored answer grounded in the resume and job description. Keep it warm, natural, and human in first person. Avoid AI-sounding phrasing, cliches, and stiff corporate language. ' +
+            'If a cover-letter or motivation field is visible, write a concise tailored answer grounded in the resume and job description. Keep it warm, natural, and human in first person. Avoid AI-sounding phrasing, cliches, stiff corporate language, em dashes, and hidden formatting characters. ' +
             'Use done only when the application is submitted or the page clearly shows a confirmation or only non-essential follow-up remains. ' +
             'Use finalStatus=review_required only for captcha, MFA, legal declarations not supported by the resume, or truly missing personal information that is not already supplied by applicationProfile and cannot be conservatively inferred. ' +
             'If blocked or impossible, use fail with a concise message.'
@@ -2660,8 +2678,12 @@ const executeDecision = async (
         job,
         applicationProfile
       );
+      const typedText =
+        text !== undefined && isCoverLetterFieldKind(fieldKind)
+          ? normalizeCoverLetterText(text)
+          : text;
       const resolvedTargetId = resolveFallbackTypeTargetId(decision, snapshot);
-      if (text === undefined) {
+      if (typedText === undefined) {
         const element =
           getSnapshotElement(snapshot, resolvedTargetId || decision.targetId) ||
           getActiveEditableElement(snapshot);
@@ -2676,27 +2698,25 @@ const executeDecision = async (
             'LLM attempted to type into the focused field, but there is no detectable focused element. Use Tab or focus first.'
           );
         }
-        await typeIntoFocusedElement(page, text);
+        await typeIntoFocusedElement(page, typedText);
         return {
           executedAction: {
             action: 'type',
             targetId: resolvedTargetId || snapshot.activeElementId,
-            text
+            text: typedText
           },
           page,
-          capturedCoverLetterText:
-            fieldKind === 'cover_letter' || fieldKind === 'motivation' ? text : undefined
+          capturedCoverLetterText: isCoverLetterFieldKind(fieldKind) ? typedText : undefined
         };
       }
       if (!resolvedTargetId) {
         throw new Error('LLM type action could not resolve an editable target.');
       }
-      await typeIntoTarget(page, resolvedTargetId, text, snapshot);
+      await typeIntoTarget(page, resolvedTargetId, typedText, snapshot);
       return {
-        executedAction: { action: 'type', targetId: resolvedTargetId, text },
+        executedAction: { action: 'type', targetId: resolvedTargetId, text: typedText },
         page,
-        capturedCoverLetterText:
-          fieldKind === 'cover_letter' || fieldKind === 'motivation' ? text : undefined
+        capturedCoverLetterText: isCoverLetterFieldKind(fieldKind) ? typedText : undefined
       };
     }
     case 'select': {
