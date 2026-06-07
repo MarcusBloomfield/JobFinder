@@ -12,6 +12,8 @@ const URL_PATTERN = /\bhttps?:\/\/[^\s]+/gi;
 const MAX_PROFILE_SUMMARY_CHARS = 520;
 const MAX_LINE_CHARS = 220;
 const MAX_FILENAME_CHARS = 150;
+const MAX_SOURCE_RESUME_LINES = 140;
+const MAX_ADDITIONAL_SOURCE_LINES = 90;
 const PLAYWRIGHT_ARTIFACTS_DIR = path.resolve(__dirname, '../../.playwright');
 export const TAILORED_RESUMES_DIR = path.join(PLAYWRIGHT_ARTIFACTS_DIR, 'tailored-resumes');
 
@@ -155,6 +157,19 @@ const dedupeItems = (items: string[]): string[] => {
   });
 
   return result;
+};
+
+const getSourceResumeLines = (resume: Resume): string[] =>
+  dedupeItems(
+    resume.content
+      .split(/\r?\n/)
+      .map(line => compactText(line))
+      .filter(line => line.length > 0)
+  ).slice(0, MAX_SOURCE_RESUME_LINES);
+
+const removeKnownItems = (items: string[], itemsToRemove: string[]): string[] => {
+  const normalizedItemsToRemove = new Set(itemsToRemove.map(item => item.toLowerCase()));
+  return items.filter(item => !normalizedItemsToRemove.has(item.toLowerCase()));
 };
 
 const tokenize = (value: string): string[] =>
@@ -308,29 +323,21 @@ const buildSummary = (
   relevantSkills: string[],
   relevantExperience: string[],
   applicationProfile?: ApplicationProfile
-): string => {
+): string | undefined => {
   const profileSummary = normalizeOptionalText(applicationProfile?.professionalSummary);
   if (profileSummary) {
     return compactText(profileSummary, MAX_PROFILE_SUMMARY_CHARS);
   }
 
   if (relevantExperience.length > 0) {
-    return compactText(
-      `Background aligned to the ${job.title} role, with experience including ${relevantExperience[0]}`,
-      MAX_PROFILE_SUMMARY_CHARS
-    );
+    return compactText(relevantExperience[0], MAX_PROFILE_SUMMARY_CHARS);
   }
 
   if (relevantSkills.length > 0) {
-    return compactText(
-      `Background aligned to the ${job.title} role, with relevant skills including ${relevantSkills
-        .slice(0, 5)
-        .join(', ')}.`,
-      MAX_PROFILE_SUMMARY_CHARS
-    );
+    return compactText(relevantSkills.slice(0, 8).join(', '), MAX_PROFILE_SUMMARY_CHARS);
   }
 
-  return compactText(`Resume tailored for the ${job.title} role at ${job.company}.`, MAX_PROFILE_SUMMARY_CHARS);
+  return undefined;
 };
 
 const sanitizeFilePart = (value: string): string => {
@@ -454,10 +461,11 @@ const buildPlainTextContent = (parts: {
   name: string;
   contactLines: string[];
   targetLine: string;
-  summary: string;
+  summary?: string;
   skills: string[];
   experience: string[];
   education: string[];
+  additionalSourceLines: string[];
   profileDetails: string[];
 }): string =>
   [
@@ -466,7 +474,7 @@ const buildPlainTextContent = (parts: {
     parts.targetLine,
     '',
     'Profile',
-    parts.summary,
+    parts.summary || '',
     '',
     'Relevant Skills',
     parts.skills.join(', '),
@@ -476,6 +484,9 @@ const buildPlainTextContent = (parts: {
     '',
     'Education and Qualifications',
     parts.education.join('\n'),
+    '',
+    'Additional Experience and Details',
+    parts.additionalSourceLines.join('\n'),
     '',
     'Additional Application Details',
     parts.profileDetails.join('\n')
@@ -488,10 +499,11 @@ const createDocument = (parts: {
   name: string;
   contactLines: string[];
   targetLine: string;
-  summary: string;
+  summary?: string;
   skills: string[];
   experience: string[];
   education: string[];
+  additionalSourceLines: string[];
   profileDetails: string[];
 }): Document => {
   const children: Paragraph[] = [
@@ -506,11 +518,14 @@ const createDocument = (parts: {
   }
 
   children.push(paragraph(parts.targetLine));
-  children.push(heading('Profile'));
-  children.push(paragraph(parts.summary));
+  if (parts.summary) {
+    children.push(heading('Profile'));
+    children.push(paragraph(parts.summary));
+  }
   addSection(children, 'Relevant Skills', parts.skills);
   addSection(children, 'Relevant Experience', parts.experience);
   addSection(children, 'Education and Qualifications', parts.education);
+  addSection(children, 'Additional Experience and Details', parts.additionalSourceLines);
   addSection(children, 'Additional Application Details', parts.profileDetails);
 
   return new Document({
@@ -567,6 +582,7 @@ export const createTailoredResumeForJob = async (
     ...splitDetailItems(applicationProfile?.educationDetails),
     ...normalizeStringArray(sourceResume.education)
   ];
+  const sourceResumeLines = getSourceResumeLines(sourceResume);
 
   const relevantSkills = rankItems(rawSkills, jobKeywords, 14);
   const relevantExperience = rankItems(rawExperience, jobKeywords, 12);
@@ -576,6 +592,13 @@ export const createTailoredResumeForJob = async (
   const contactLines = getContactLines(sourceResume, applicationProfile);
   const targetLine = compactText(`Target role: ${job.title} at ${job.company}`, 180);
   const summary = buildSummary(job, relevantSkills, relevantExperience, applicationProfile);
+  const additionalSourceLines = removeKnownItems(sourceResumeLines, [
+    name,
+    ...contactLines,
+    ...(summary ? [summary] : []),
+    ...relevantExperience,
+    ...relevantEducation
+  ]).slice(0, MAX_ADDITIONAL_SOURCE_LINES);
   const fileName = buildTailoredResumeFileName(job, sourceResume, applicationProfile);
   const filePath = getUniqueFilePath(outputDirectory, fileName);
   const generatedFileName = path.basename(filePath);
@@ -587,6 +610,7 @@ export const createTailoredResumeForJob = async (
     skills: relevantSkills,
     experience: relevantExperience,
     education: relevantEducation,
+    additionalSourceLines,
     profileDetails
   });
 
@@ -598,6 +622,7 @@ export const createTailoredResumeForJob = async (
     skills: relevantSkills,
     experience: relevantExperience,
     education: relevantEducation,
+    additionalSourceLines,
     profileDetails
   });
   const buffer = await Packer.toBuffer(document);
@@ -607,8 +632,9 @@ export const createTailoredResumeForJob = async (
     .filter(keyword => plainTextContent.toLowerCase().includes(keyword))
     .slice(0, 12);
   const tailoringNotes = [
-    `Named for ${job.company || 'the employer'} and ${job.title || 'the role'}.`,
-    `Prioritized uploaded resume/profile facts matching: ${matchedKeywords.join(', ') || 'available role details'}.`,
+    `Altered "${sourceResume.fileName}" for ${job.company || 'the employer'} and ${job.title || 'the role'} instead of rebuilding a resume from scratch.`,
+    `Promoted existing resume/profile facts matching: ${matchedKeywords.join(', ') || 'available role details'}.`,
+    'Kept source resume details in the document and only added explicit saved profile facts where available.',
     'No qualifications, employers, dates, licences, or work rights were added unless present in the uploaded resume or saved profile.'
   ];
 

@@ -166,7 +166,7 @@ JobFinder/
 
 > **Auto-apply cover letters** are generated in `backend/src/services/applicationAgentService.ts` and are intended to stay short, warm, and human-sounding rather than overly formal.
 
-> **Auto-apply tailored resumes** are generated in `backend/src/services/tailoredResumeService.ts` only when auto-apply starts for a job. The generated DOCX file is named with the candidate, company, and role, uses only uploaded resume content plus explicit saved profile details, reorders/prioritizes facts against job keywords, and does not add unsupported credentials, dates, work rights, licences, or employers. `applicationAgentService.ts` makes the generated tailored resume the active upload option and keeps original uploaded resumes available as fallbacks. The tracked application now stores the exact resume used, whether it was generated, the source resume filename, the full resume text snapshot, and the generated DOCX link so both Progress and Profile can show what was actually used for each job.
+> **Auto-apply tailored resumes** are altered DOCX versions of an uploaded resume in `backend/src/services/tailoredResumeService.ts`, created only when auto-apply starts for a job. The file is named with the candidate, company, and role, keeps source resume details in the document, promotes/reorders existing resume and explicit saved profile facts against job keywords, and does not add unsupported credentials, dates, work rights, licences, or employers. `applicationAgentService.ts` makes the altered tailored resume the active upload option and keeps original uploaded resumes available as fallbacks. The tracked application stores the exact resume used, whether it was tailored, the source resume filename, the full resume text snapshot, and the generated DOCX link so both Progress and Profile can show what was actually used for each job.
 
 > **Profile Fill with AI** is available on the Profile page. It sends stored parsed resumes plus the current browser-saved profile to `POST /api/apply/profile/fill`, where `applicationProfileFillService.ts` asks OpenAI to extract only resume-supported fields and preserve existing profile values unless the resume explicitly replaces them.
 
@@ -231,11 +231,11 @@ JobFinder/
 - Visited jobs get visual indicator
 
 ### 6. Auto-Apply With Tailored Resume
-- `applyToJob` builds one tailored DOCX resume in the per-job application run directory before browser automation starts.
-- The agent receives the generated tailored resume as `activeResume` plus a `resumeLibrary` that includes original uploaded files. It should upload the tailored resume by default.
+- `applyToJob` alters one uploaded resume into a tailored DOCX in the per-job application run directory before browser automation starts.
+- The agent receives the altered tailored resume as `activeResume` plus a `resumeLibrary` that includes original uploaded files. It should upload the tailored resume by default.
 - The generated resume metadata, URL, source resume name, and full final resume text are persisted with the tracked application and shown in the Progress and Profile history views.
 - If an upload field or employer site requires a file type the tailored DOCX cannot satisfy, the agent can switch to a compatible original uploaded resume.
-- Tailoring is deterministic and factual: it can prioritize, reorder, summarize, and name the resume for the job, but it must not invent qualifications or turn job requirements into candidate claims.
+- Tailoring is deterministic and factual: it can prioritize, reorder, summarize, and name existing resume/profile facts for the job, but it must not rebuild the resume from scratch, invent qualifications, or turn job requirements into candidate claims.
 
 ---
 
