@@ -261,6 +261,36 @@ interface BrowserSession {
   page: Page;
 }
 
+interface ApplicationChecklistRuntime {
+  selectedResumeRef: string;
+  selectedResumeFileName: string;
+  resumeUploadAttempted: boolean;
+  resumeUploadChecked: boolean;
+  uploadedResumeRef?: string;
+  uploadedResumeFileName?: string;
+}
+
+interface ApplicationChecklistContext {
+  mustCompleteBeforeDone: string[];
+  state: {
+    activeResumeRef: string;
+    activeResumeFileName: string;
+    uploadAttemptedThisRun: boolean;
+    uploadedResumeRef: string | null;
+    uploadedResumeFileName: string | null;
+    resumeUploadChecked: boolean;
+    visibleResumeUploadTargets: Array<{
+      id: number;
+      label: string;
+      required: boolean;
+      invalid: boolean;
+      accept: string | null;
+    }>;
+    uploadRequiredOnCurrentPage: boolean;
+  };
+  outstanding: string[];
+}
+
 export interface ApplicationArtifact {
   step: number;
   label: string;
@@ -2098,12 +2128,124 @@ const shouldForceContinueAutomation = (
   return Boolean(normalizeOptionalText(applicationProfile?.employerQuestionNotes));
 };
 
+const createApplicationChecklistRuntime = (
+  activeResumeOption: ResumeOption
+): ApplicationChecklistRuntime => ({
+  selectedResumeRef: activeResumeOption.resumeRef,
+  selectedResumeFileName: activeResumeOption.resume.fileName,
+  resumeUploadAttempted: false,
+  resumeUploadChecked: false
+});
+
+const syncChecklistActiveResume = (
+  checklist: ApplicationChecklistRuntime,
+  activeResumeOption: ResumeOption
+): void => {
+  checklist.selectedResumeRef = activeResumeOption.resumeRef;
+  checklist.selectedResumeFileName = activeResumeOption.resume.fileName;
+};
+
+const isResumeUploadElement = (element: PageElementSnapshot): boolean => {
+  if (!element.uploadable || element.disabled || element.hidden) {
+    return false;
+  }
+
+  const hints = `${getElementHints(element)} ${element.accept || ''}`.toLowerCase();
+  return /resume|cv|curriculum vitae/.test(hints) || /(pdf|doc|docx)/.test(hints);
+};
+
+const getResumeUploadElements = (snapshot: PageSnapshot): PageElementSnapshot[] =>
+  snapshot.elements.filter(isResumeUploadElement);
+
+const buildApplicationChecklistContext = (
+  activeResumeOption: ResumeOption,
+  checklist: ApplicationChecklistRuntime,
+  snapshot: PageSnapshot
+): ApplicationChecklistContext => {
+  const visibleResumeUploadTargets = getResumeUploadElements(snapshot).map(element => ({
+    id: element.id,
+    label: compactText(element.label || element.name || element.text || 'Resume upload', 120),
+    required: Boolean(element.required),
+    invalid: Boolean(element.invalid),
+    accept: element.accept || null
+  }));
+  const uploadRequiredOnCurrentPage = visibleResumeUploadTargets.some(
+    target => target.required || target.invalid
+  );
+  const outstanding: string[] = [];
+
+  if (visibleResumeUploadTargets.length > 0 && !checklist.resumeUploadAttempted) {
+    outstanding.push(
+      `Upload the active resume "${activeResumeOption.resume.fileName}" to the visible resume/CV upload field before submitting.`
+    );
+  }
+
+  if (uploadRequiredOnCurrentPage && !checklist.resumeUploadChecked) {
+    outstanding.push('Resolve the required or invalid resume/CV upload field and verify it accepted the selected file.');
+  }
+
+  if (checklist.resumeUploadAttempted && !checklist.resumeUploadChecked) {
+    outstanding.push('Check the page after the upload and correct the resume if the file name, validation state, or upload prompt looks wrong.');
+  }
+
+  if (snapshot.validationMessages.length > 0) {
+    outstanding.push('Review visible validation messages and correct blocked fields before submitting.');
+  }
+
+  return {
+    mustCompleteBeforeDone: [
+      'Confirm the active resume is the best uploaded resume for this job.',
+      'Upload the active resume when a resume/CV field is visible, required, invalid, or expected by the application.',
+      'After upload, check the page state, visible file name when available, and validation messages to ensure the correct resume was accepted.',
+      'Fill required contact, profile, work-rights, screening, and cover-letter fields from the resume/applicationProfile.',
+      'Correct inaccurate prefilled answers, weak drafts, and visible validation errors.',
+      'Use done only after submission is confirmed, or after all essential checklist items are complete and only non-essential follow-up remains.'
+    ],
+    state: {
+      activeResumeRef: activeResumeOption.resumeRef,
+      activeResumeFileName: activeResumeOption.resume.fileName,
+      uploadAttemptedThisRun: checklist.resumeUploadAttempted,
+      uploadedResumeRef: checklist.uploadedResumeRef || null,
+      uploadedResumeFileName: checklist.uploadedResumeFileName || null,
+      resumeUploadChecked: checklist.resumeUploadChecked,
+      visibleResumeUploadTargets,
+      uploadRequiredOnCurrentPage
+    },
+    outstanding
+  };
+};
+
+const getChecklistDoneBlocker = (
+  decision: AgentDecision,
+  checklistContext: ApplicationChecklistContext
+): string | undefined => {
+  if (decision.action !== 'done') {
+    return undefined;
+  }
+
+  const hasVisibleResumeUpload = checklistContext.state.visibleResumeUploadTargets.length > 0;
+  if (hasVisibleResumeUpload && !checklistContext.state.uploadAttemptedThisRun) {
+    return `Checklist incomplete: a resume/CV upload field is visible, but "${checklistContext.state.activeResumeFileName}" has not been uploaded yet.`;
+  }
+
+  if (checklistContext.state.uploadRequiredOnCurrentPage && !checklistContext.state.resumeUploadChecked) {
+    return 'Checklist incomplete: a required or invalid resume/CV upload field still needs to be uploaded and checked.';
+  }
+
+  if (checklistContext.outstanding.some(item => item.toLowerCase().includes('validation'))) {
+    return 'Checklist incomplete: visible validation messages need to be resolved before finishing.';
+  }
+
+  return undefined;
+};
+
 const planNextAction = async (
   job: Job,
   activeResumeOption: ResumeOption,
   availableResumeOptions: ResumeOption[],
   applicationProfile: ApplicationProfile | undefined,
   snapshot: PageSnapshot,
+  checklistContext: ApplicationChecklistContext,
   logs: string[],
   extraInstruction?: string,
   attemptFeedback?: string
@@ -2131,6 +2273,9 @@ const planNextAction = async (
             'Use activeResume as the current primary source of truth. It is the most relevant uploaded resume for this job. You may use resumeLibrary only as alternative stored uploaded resumes that you can switch to later, and you must not merge contradictory claims across resumes. ' +
             'Do not create or ask for a generated resume. Use only uploaded resume files for resume/CV uploads. ' +
             'If one of the alternative resumes is materially more relevant for this specific role, switch to it by using upload_resume with both targetId and that resumeRef. After you upload a different resume, keep later answers consistent with that uploaded resume. ' +
+            'Follow applicationChecklist every step before choosing an action. Treat applicationChecklist.outstanding as mandatory work unless the page clearly proves the item is no longer relevant. ' +
+            'Do not use done while a resume/CV upload field is visible, required, invalid, or expected unless the selected uploaded resume has already been uploaded and checked on the page. ' +
+            'When checking a resume upload, compare the accepted filename or page feedback when visible, review validation messages, and replace the file if it is missing or not the active resume. ' +
             'Prefer concise professional answers. ' +
             'You have a Playwright-backed browser toolset, not raw code execution. ' +
             'Use these actions only: click, double_click, hover, focus, clear, type, select, check, upload_resume, press, scroll, scroll_into_view, wait, wait_for_text, go_back, reload, done, fail. ' +
@@ -2169,6 +2314,7 @@ const planNextAction = async (
               activeResume,
               candidateProfile,
               resumeLibrary,
+              applicationChecklist: checklistContext,
               resumeSummary: compactText(activeResumeOption.resume.content, MAX_RESUME_CHARS),
               page: snapshot,
               recentLogs: logs.slice(-8),
@@ -2645,14 +2791,24 @@ const verifyActionOutcome = (
       const uploadedResumeLabel = executedAction.resumeFileName
         ? ` "${executedAction.resumeFileName}"`
         : '';
-      return !afterInvalid || (beforeInvalid && !afterInvalid)
+      const expectedFileName = normalizeComparable(executedAction.resumeFileName || '');
+      const afterValue = normalizeComparable(afterElement?.value || '');
+      const pageText = normalizeComparable(afterSnapshot.visibleText);
+      const fileNameIsVisible =
+        Boolean(expectedFileName) && (afterValue.includes(expectedFileName) || pageText.includes(expectedFileName));
+      return fileNameIsVisible
         ? {
             success: true,
-            message: `Verified the resume upload field no longer appears invalid after uploading${uploadedResumeLabel}.`
+            message: `Verified the uploaded resume${uploadedResumeLabel} is visible or stored in the upload field.`
+          }
+        : !afterInvalid || (beforeInvalid && !afterInvalid)
+        ? {
+            success: true,
+            message: `Checked the resume upload after uploading${uploadedResumeLabel}; the field no longer appears invalid.`
           }
         : {
             success: true,
-            message: `Resume upload${uploadedResumeLabel} was attempted. Review the screenshot if the page still needs confirmation.`
+            message: `Checked the resume upload${uploadedResumeLabel}. Review the screenshot if the page still needs confirmation.`
           };
     }
     case 'wait_for_text': {
@@ -2961,6 +3117,7 @@ export const applyToJob = async (
     availableResumeOptions.map(option => [option.resumeRef.toLowerCase(), option] as const)
   );
   let activeResumeOption = availableResumeOptions[0];
+  const applicationChecklist = createApplicationChecklistRuntime(activeResumeOption);
   await closeSeekLoginSessionIfOpen();
   const session = await launchBrowserSession();
   const logs: string[] = [];
@@ -2979,6 +3136,9 @@ export const applyToJob = async (
           return `${optionLabel}${option.resumeRef === activeResumeOption.resumeRef ? ' (active)' : ''}`;
         })
         .join('; ')}`
+    );
+    logs.push(
+      `Checklist: verify active resume "${activeResumeOption.resume.fileName}", upload it when a resume/CV field is visible, then check the upload before finishing.`
     );
     logs.push(`Opening job page: ${job.url}`);
     await currentPage.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -3016,6 +3176,11 @@ export const applyToJob = async (
         const attemptLabel = attempt === 1 ? `Step ${step}` : `Step ${step} attempt ${attempt}`;
 
         try {
+          const checklistContext = buildApplicationChecklistContext(
+            activeResumeOption,
+            applicationChecklist,
+            workingSnapshot
+          );
           const combinedExtraInstruction = [humanContinuationInstruction, stepExtraInstruction]
             .filter(Boolean)
             .join(' ');
@@ -3025,6 +3190,7 @@ export const applyToJob = async (
             availableResumeOptions,
             applicationProfile,
             workingSnapshot,
+            checklistContext,
             logs,
             combinedExtraInstruction || undefined,
             attemptFeedback
@@ -3041,10 +3207,33 @@ export const applyToJob = async (
               availableResumeOptions,
               applicationProfile,
               workingSnapshot,
+              checklistContext,
               logs,
               [humanContinuationInstruction, stepExtraInstruction].filter(Boolean).join(' ') || undefined,
               attemptFeedback
             );
+          }
+
+          const checklistDoneBlocker = getChecklistDoneBlocker(decision, checklistContext);
+          if (checklistDoneBlocker) {
+            logs.push(`${attemptLabel}: checklist blocked done - ${checklistDoneBlocker}`);
+            stepExtraInstruction =
+              `${checklistDoneBlocker} Choose the next action that completes the checklist, usually upload_resume for the visible resume/CV field or a correction for a validation message.`;
+            decision = await planNextAction(
+              job,
+              activeResumeOption,
+              availableResumeOptions,
+              applicationProfile,
+              workingSnapshot,
+              checklistContext,
+              logs,
+              [humanContinuationInstruction, stepExtraInstruction].filter(Boolean).join(' ') || undefined,
+              attemptFeedback
+            );
+            const repeatedChecklistBlocker = getChecklistDoneBlocker(decision, checklistContext);
+            if (repeatedChecklistBlocker) {
+              throw new Error(repeatedChecklistBlocker);
+            }
           }
 
           logs.push(
@@ -3156,6 +3345,7 @@ export const applyToJob = async (
           if (execution.nextActiveResume) {
             const previousResumeRef = activeResumeOption.resumeRef;
             activeResumeOption = execution.nextActiveResume;
+            syncChecklistActiveResume(applicationChecklist, activeResumeOption);
             logs.push(
               `${attemptLabel} resume - using ${activeResumeOption.resumeRef} (${activeResumeOption.resume.fileName})` +
                 `${activeResumeOption.resumeRef !== previousResumeRef ? ' as the active resume.' : '.'}`
@@ -3176,6 +3366,17 @@ export const applyToJob = async (
             postActionSnapshot
           );
           logs.push(`${attemptLabel} check - ${verification.message}`);
+          if (execution.executedAction.action === 'upload_resume') {
+            applicationChecklist.resumeUploadAttempted = true;
+            applicationChecklist.uploadedResumeRef =
+              execution.executedAction.resumeRef || activeResumeOption.resumeRef;
+            applicationChecklist.uploadedResumeFileName =
+              execution.executedAction.resumeFileName || activeResumeOption.resume.fileName;
+            applicationChecklist.resumeUploadChecked = verification.success;
+            logs.push(
+              `${attemptLabel} checklist - resume upload checked for "${applicationChecklist.uploadedResumeFileName}".`
+            );
+          }
           artifacts.push(
             await captureRunScreenshot(
               currentPage,

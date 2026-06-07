@@ -241,6 +241,7 @@ JobFinder/
 - Resume uploads use only original user-uploaded files.
 - The selected uploaded resume filename and full text snapshot are persisted with the tracked application and shown in the Progress and Profile history views.
 - The agent can switch to another uploaded resume when it is materially more relevant for the role.
+- The agent receives a per-step checklist so it must verify the active resume, upload/check resume fields, fix validation messages, and avoid `done` while required resume upload work is still visible.
 - Review-required stops create human intervention records and wait for Continue Bot, Skip Application, or Mark Failed from the Progress page.
 
 ---
