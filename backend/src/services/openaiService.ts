@@ -77,7 +77,7 @@ Based ONLY on the resume content provided above:
   
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-5.4-mini',
+      model: 'gpt-5.4',
       messages: messages,
       temperature: 0.1, // Further reduced temperature for precision
       response_format: { type: 'json_object' }
@@ -140,7 +140,7 @@ export const evaluateJobMatch = async (job: Job, resume: Resume): Promise<number
   
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-5.4-mini',
+      model: 'gpt-5.4',
       messages: [
         {
           role: 'system',

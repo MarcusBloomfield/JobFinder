@@ -14,6 +14,7 @@
 - The component is mounted globally in `src/App.tsx`, polls `/api/interventions/pending`, and opens a modal dialog only when pending handoffs exist.
 - The old inline Progress-page handoff panel was removed; resolving a handoff refreshes application tracking.
 - Auto-apply now has an optional distance limit in the Profile page. The user sets a home address/current location plus max kilometres; manual and bulk auto-apply skip jobs outside that range or jobs whose location cannot be resolved.
+- OpenAI-backed LLM features default to `gpt-5.4`; environment variables such as `APPLY_AGENT_MODEL`, `COVER_LETTER_MODEL`, and `PROFILE_FILL_MODEL` can still override specific flows.
 
 ---
 
