@@ -17,6 +17,7 @@ import { getStoredResume, listStoredResumes, parseResume } from '../services/res
 import { parseCoverLetterExample } from '../services/coverLetterExampleService';
 import { generateSearchTerms, evaluateJobMatch, evaluateJobMatchesBulk } from '../services/openAiService';
 import { scrapeJobs } from '../services/scrapeService';
+import { checkAutoApplyDistance } from '../services/jobDistanceService';
 import {
   applyToJob as autoApplyToJob,
   fetchApplicationHistory,
@@ -419,6 +420,29 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     triggerSource: ApplicationTriggerSource
   ): Promise<ApplyRunOutcome> => {
     setError(null);
+    const distanceCheck = checkAutoApplyDistance(job, applicationProfile);
+    if (!distanceCheck.allowed) {
+      setJobs(currentJobs =>
+        currentJobs.map(currentJob =>
+          currentJob.id === job.id
+            ? {
+                ...currentJob,
+                applicationStatus: 'skipped',
+                applicationMessage: distanceCheck.message,
+                applicationLogs: [distanceCheck.message],
+                applicationArtifacts: [],
+                applicationUpdatedAt: new Date().toISOString()
+              }
+            : currentJob
+        )
+      );
+
+      return {
+        shouldStopBatch: false,
+        stopReason: distanceCheck.message
+      };
+    }
+
     setJobs(currentJobs =>
       currentJobs.map(currentJob =>
         currentJob.id === job.id
@@ -506,16 +530,46 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       return;
     }
 
-    const eligibleJobs = jobs.filter(
+    const matchingJobs = jobs.filter(
       job =>
         (job.matchScore || 0) >= 60 &&
         job.applicationStatus !== 'applied' &&
         job.applicationStatus !== 'applying' &&
         job.applicationStatus !== 'skipped'
     );
+    const distanceCheckedJobs = matchingJobs.map(job => ({
+      job,
+      distanceCheck: checkAutoApplyDistance(job, applicationProfile)
+    }));
+    const blockedByDistanceJobs = distanceCheckedJobs.filter(item => !item.distanceCheck.allowed);
+    const eligibleJobs = distanceCheckedJobs
+      .filter(item => item.distanceCheck.allowed)
+      .map(item => item.job);
+
+    if (blockedByDistanceJobs.length > 0) {
+      const blockedJobIds = new Set(blockedByDistanceJobs.map(item => item.job.id));
+      const blockedMessagesByJobId = new Map(
+        blockedByDistanceJobs.map(item => [item.job.id, item.distanceCheck.message] as const)
+      );
+
+      setJobs(currentJobs =>
+        currentJobs.map(currentJob =>
+          blockedJobIds.has(currentJob.id)
+            ? {
+                ...currentJob,
+                applicationStatus: 'skipped',
+                applicationMessage: blockedMessagesByJobId.get(currentJob.id) || currentJob.applicationMessage,
+                applicationLogs: [blockedMessagesByJobId.get(currentJob.id) || 'Skipped by distance checker.'],
+                applicationArtifacts: [],
+                applicationUpdatedAt: new Date().toISOString()
+              }
+            : currentJob
+        )
+      );
+    }
 
     if (eligibleJobs.length === 0) {
-      setError('No jobs with a 60% or higher match are available for fully automatic apply');
+      setError('No jobs with a 60% or higher match are available within the auto-apply distance limit');
       return;
     }
 

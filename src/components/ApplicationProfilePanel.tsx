@@ -97,6 +97,28 @@ const ApplicationProfilePanel: React.FC<ApplicationProfilePanelProps> = ({
           />
         </label>
 
+        <label className="application-profile-field application-profile-field-wide">
+          <span>Home address for distance checks</span>
+          <input
+            type="text"
+            placeholder="Perth, WA 6000"
+            value={profile.homeAddress}
+            onChange={(event) => onChange({ homeAddress: event.target.value })}
+          />
+        </label>
+
+        <label className="application-profile-field">
+          <span>Max auto-apply distance (km)</span>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            placeholder="25"
+            value={profile.maxAutoApplyDistanceKm}
+            onChange={(event) => onChange({ maxAutoApplyDistanceKm: event.target.value })}
+          />
+        </label>
+
         <div className="application-profile-subheading">Links and availability</div>
 
         <label className="application-profile-field">

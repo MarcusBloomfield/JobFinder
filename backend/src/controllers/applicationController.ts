@@ -9,6 +9,7 @@ import {
 } from '../models/ApplicationProfile';
 import * as applicationAgentService from '../services/applicationAgentService';
 import * as applicationProfileFillService from '../services/applicationProfileFillService';
+import { checkAutoApplyDistance } from '../services/jobDistanceService';
 import {
   ApplicationTriggerSource,
   createTrackedApplication,
@@ -62,6 +63,8 @@ const validateApplicationProfile = (profile: any): profile is ApplicationProfile
     typeof profile.email === 'string' &&
     typeof profile.phone === 'string' &&
     typeof profile.currentLocation === 'string' &&
+    typeof profile.homeAddress === 'string' &&
+    typeof profile.maxAutoApplyDistanceKm === 'string' &&
     typeof profile.linkedinUrl === 'string' &&
     typeof profile.portfolioUrl === 'string' &&
     typeof profile.githubUrl === 'string' &&
@@ -132,6 +135,22 @@ export const applyToJob = async (req: Request, res: Response) => {
       return res.status(400).json({
         error: true,
         message: 'Invalid triggerSource. Expected "manual" or "bulk".'
+      });
+    }
+
+    const distanceCheck = checkAutoApplyDistance(job, applicationProfile);
+    if (!distanceCheck.allowed) {
+      return res.status(200).json({
+        error: false,
+        message: distanceCheck.message,
+        data: {
+          status: 'skipped',
+          message: distanceCheck.message,
+          logs: [distanceCheck.message],
+          finalUrl: job.url,
+          steps: 0,
+          artifacts: []
+        }
       });
     }
 

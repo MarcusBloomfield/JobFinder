@@ -55,6 +55,8 @@ const normalizeProfile = (
     email: normalizeString(candidate.email) || fallback.email,
     phone: normalizeString(candidate.phone) || fallback.phone,
     currentLocation: normalizeString(candidate.currentLocation) || fallback.currentLocation,
+    homeAddress: normalizeString(candidate.homeAddress) || fallback.homeAddress,
+    maxAutoApplyDistanceKm: fallback.maxAutoApplyDistanceKm,
     linkedinUrl: normalizeString(candidate.linkedinUrl) || fallback.linkedinUrl,
     portfolioUrl: normalizeString(candidate.portfolioUrl) || fallback.portfolioUrl,
     githubUrl: normalizeString(candidate.githubUrl) || fallback.githubUrl,

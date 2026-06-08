@@ -773,6 +773,8 @@ const buildApplicationProfileContext = (applicationProfile?: ApplicationProfile)
     email: normalizeOptionalText(applicationProfile.email) || null,
     phone: normalizeOptionalText(applicationProfile.phone) || null,
     currentLocation: getProfileLocation(applicationProfile) || null,
+    homeAddress: normalizeOptionalText(applicationProfile.homeAddress) || null,
+    maxAutoApplyDistanceKm: normalizeOptionalText(applicationProfile.maxAutoApplyDistanceKm) || null,
     linkedinUrl: normalizeOptionalText(applicationProfile.linkedinUrl) || null,
     portfolioUrl: normalizeOptionalText(applicationProfile.portfolioUrl) || null,
     githubUrl: normalizeOptionalText(applicationProfile.githubUrl) || null,

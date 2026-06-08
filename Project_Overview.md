@@ -13,6 +13,7 @@
 - Human intervention handoffs are handled by `src/components/HumanInterventionPanel.tsx`.
 - The component is mounted globally in `src/App.tsx`, polls `/api/interventions/pending`, and opens a modal dialog only when pending handoffs exist.
 - The old inline Progress-page handoff panel was removed; resolving a handoff refreshes application tracking.
+- Auto-apply now has an optional distance limit in the Profile page. The user sets a home address/current location plus max kilometres; manual and bulk auto-apply skip jobs outside that range or jobs whose location cannot be resolved.
 
 ---
 
@@ -174,6 +175,8 @@ JobFinder/
 > **Cover letter examples** can be uploaded from the front-page Resume section as PDF/DOCX files. `POST /api/cover-letter-examples/parse` extracts text and saves the examples in the browser-saved `ApplicationProfile`; auto-apply sends up to three examples to the cover-letter generator as style-only references.
 
 > **Auto-apply resumes** are selected from user-uploaded resumes only. `applicationAgentService.ts` ranks the active resume plus stored uploaded resumes by job relevance and uses the best original upload as the active resume. No tailored/generated resume file is created for auto-apply. The tracked application stores the exact uploaded resume filename and full resume text snapshot so Progress and Profile can show what was actually used for each job.
+
+> **Auto-apply distance checks** are implemented in `src/services/jobDistanceService.ts` and `backend/src/services/jobDistanceService.ts`. `ApplicationProfile` stores `homeAddress` and `maxAutoApplyDistanceKm`; if a max distance is set, auto-apply only proceeds when the job location can be resolved and is within range. Remote jobs are allowed.
 
 > **Human intervention** is wired through SQLite-backed `/api/interventions/*` routes and the Progress page panel. When the apply agent reaches a review-required stop, it creates a pending intervention, keeps the browser session open, and resumes/skips/fails based on the user action.
 

@@ -15,6 +15,8 @@ export interface ApplicationProfile {
   email: string;
   phone: string;
   currentLocation: string;
+  homeAddress: string;
+  maxAutoApplyDistanceKm: string;
   linkedinUrl: string;
   portfolioUrl: string;
   githubUrl: string;
@@ -38,6 +40,8 @@ export const DEFAULT_APPLICATION_PROFILE: ApplicationProfile = {
   email: '',
   phone: '',
   currentLocation: '',
+  homeAddress: '',
+  maxAutoApplyDistanceKm: '',
   linkedinUrl: '',
   portfolioUrl: '',
   githubUrl: '',
@@ -104,6 +108,8 @@ export const normalizeApplicationProfile = (value: unknown): ApplicationProfile 
     email: normalizeString(candidate.email),
     phone: normalizeString(candidate.phone),
     currentLocation: normalizeString(candidate.currentLocation),
+    homeAddress: normalizeString(candidate.homeAddress),
+    maxAutoApplyDistanceKm: normalizeString(candidate.maxAutoApplyDistanceKm),
     linkedinUrl: normalizeString(candidate.linkedinUrl),
     portfolioUrl: normalizeString(candidate.portfolioUrl),
     githubUrl: normalizeString(candidate.githubUrl),

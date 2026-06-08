@@ -15,6 +15,8 @@ export interface ApplicationProfile {
   email: string;
   phone: string;
   currentLocation: string;
+  homeAddress: string;
+  maxAutoApplyDistanceKm: string;
   linkedinUrl: string;
   portfolioUrl: string;
   githubUrl: string;
