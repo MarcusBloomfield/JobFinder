@@ -3,6 +3,7 @@ import ResumeUploader from './components/ResumeUploader';
 import CoverLetterExampleUploader from './components/CoverLetterExampleUploader';
 import ApplicationProfilePanel from './components/ApplicationProfilePanel';
 import ApplicationProgressPanel from './components/ApplicationProgressPanel';
+import HumanInterventionPanel from './components/HumanInterventionPanel';
 import SearchTerms from './components/SearchTerms';
 import LocationSelector from './components/LocationSelector';
 import JobSearchAmountSelector from './components/JobSearchAmountSelector';
@@ -125,6 +126,7 @@ const App: React.FC = () => {
             </header>
             <main className="app-main">
                 {error && <div className="error-banner">{error}</div>}
+                <HumanInterventionPanel onResolved={refreshApplicationTracking} />
 
                 {currentPage === 'progress' ? (
                     <ApplicationProgressPanel

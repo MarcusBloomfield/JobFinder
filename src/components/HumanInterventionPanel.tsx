@@ -196,41 +196,38 @@ const HumanInterventionPanel: React.FC<HumanInterventionPanelProps> = ({ onResol
     }
   };
 
+  if (!hasPendingInterventions) {
+    return null;
+  }
+
   return (
-    <section className="human-intervention-panel">
-      <div className="human-intervention-header">
-        <div>
-          <p className="application-progress-eyebrow">Automation Handoffs</p>
-          <h3>Human Intervention</h3>
-          <p>
-            {hasPendingInterventions
-              ? 'Review blocked automation runs and choose how the bot should continue.'
-              : 'No automation runs are waiting for user action.'}
-          </p>
+    <div className="human-intervention-panel" role="presentation">
+      <section
+        className="human-intervention-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="human-intervention-title"
+      >
+        <div className="human-intervention-header">
+          <div>
+            <p className="application-progress-eyebrow">Automation Handoffs</p>
+            <h3 id="human-intervention-title">Human Intervention</h3>
+            <p>Review blocked automation runs and choose how the bot should continue.</p>
+          </div>
+          <div className="human-intervention-header-actions">
+            <span className="attention">{pendingCountLabel}</span>
+            <button
+              className="human-intervention-refresh-button"
+              disabled={isLoading || Boolean(activeAction)}
+              onClick={() => void loadPendingInterventions(true)}
+            >
+              {isLoading ? 'Refreshing...' : 'Refresh'}
+            </button>
+          </div>
         </div>
-        <div className="human-intervention-header-actions">
-          <span className={hasPendingInterventions ? 'attention' : ''}>{pendingCountLabel}</span>
-          <button
-            className="human-intervention-refresh-button"
-            disabled={isLoading || Boolean(activeAction)}
-            onClick={() => void loadPendingInterventions(true)}
-          >
-            {isLoading ? 'Refreshing...' : 'Refresh'}
-          </button>
-        </div>
-      </div>
 
-      {error && <p className="application-detail-error human-intervention-error">{error}</p>}
+        {error && <p className="application-detail-error human-intervention-error">{error}</p>}
 
-      {isLoading && interventions.length === 0 ? (
-        <div className="application-progress-empty">
-          <p>Checking for pending automation handoffs...</p>
-        </div>
-      ) : interventions.length === 0 ? (
-        <div className="application-progress-empty">
-          <p>Pending handoffs will appear here while the Progress page is open.</p>
-        </div>
-      ) : (
         <div className="human-intervention-list">
           {interventions.map(intervention => {
             const screenshotUrl = getHumanInterventionScreenshotUrl(intervention);
@@ -305,8 +302,8 @@ const HumanInterventionPanel: React.FC<HumanInterventionPanelProps> = ({ onResol
             );
           })}
         </div>
-      )}
-    </section>
+      </section>
+    </div>
   );
 };
 

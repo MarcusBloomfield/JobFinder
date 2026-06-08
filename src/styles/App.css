@@ -519,10 +519,24 @@ button:disabled {
 }
 
 .human-intervention-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background-color: rgba(25, 38, 50, 0.68);
+}
+
+.human-intervention-dialog {
+  width: min(980px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
   background-color: white;
   border-radius: 12px;
   padding: 1.5rem;
-  box-shadow: var(--card-shadow);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
   border: 1px solid #f3d9a6;
 }
 
@@ -584,6 +598,9 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  max-height: 64vh;
+  overflow-y: auto;
+  padding-right: 0.25rem;
 }
 
 .human-intervention-card {

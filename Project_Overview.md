@@ -8,6 +8,12 @@
 
 **WebJobFinder** is a full-stack TypeScript application that helps job seekers find relevant listings. The user uploads a resume (PDF or DOCX), the app generates search terms via Google Gemini, scrapes job listings from job boards using Playwright, scores each job against the resume using Gemini, and displays ranked results with match percentages in a React UI.
 
+## Current Implementation Notes
+
+- Human intervention handoffs are handled by `src/components/HumanInterventionPanel.tsx`.
+- The component is mounted globally in `src/App.tsx`, polls `/api/interventions/pending`, and opens a modal dialog only when pending handoffs exist.
+- The old inline Progress-page handoff panel was removed; resolving a handoff refreshes application tracking.
+
 ---
 
 ## Technology Stack

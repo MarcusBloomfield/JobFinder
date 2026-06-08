@@ -12,7 +12,6 @@ import {
   TrackedApplicationStatus,
   TrackedJobApplication
 } from '../models/ApplicationTracking';
-import HumanInterventionPanel from './HumanInterventionPanel';
 
 interface ApplicationProgressPanelProps {
   summary: ApplicationTrackingSummary | null;
@@ -357,8 +356,6 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
             {isLoading ? 'Refreshing...' : 'Refresh Stats'}
           </button>
         </div>
-
-        <HumanInterventionPanel onResolved={onRefresh} />
 
         <div className="application-progress-layout">
           <section className="application-progress-section-card">
