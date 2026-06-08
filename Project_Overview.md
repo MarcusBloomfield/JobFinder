@@ -15,6 +15,7 @@
 - The old inline Progress-page handoff panel was removed; resolving a handoff refreshes application tracking.
 - Auto-apply now has an optional distance limit in the Profile page. The user sets a home address/current location plus max kilometres; manual and bulk auto-apply skip jobs outside that range or jobs whose location cannot be resolved.
 - OpenAI-backed LLM features default to `gpt-5.4`; environment variables such as `APPLY_AGENT_MODEL`, `COVER_LETTER_MODEL`, and `PROFILE_FILL_MODEL` can still override specific flows.
+- Auto-apply handles SEEK's stable first job page and choose-documents page with deterministic Playwright logic before asking the LLM. The document page uploads the selected resume and generated cover-letter DOCX through Playwright file payloads, so cover-letter upload target detection no longer depends on screenshots or native file picker dialogs.
 
 ---
 
@@ -255,6 +256,7 @@ JobFinder/
 - The selected uploaded resume filename and full text snapshot are persisted with the tracked application and shown in the Progress and Profile history views.
 - The agent can switch to another uploaded resume when it is materially more relevant for the role.
 - The agent receives a per-step checklist so it must verify the active resume, upload/check resume fields, fix validation messages, and avoid `done` while required resume upload work is still visible.
+- SEEK job detail apply clicks and the SEEK choose-documents upload step are handled before LLM planning. Snapshot capture also prioritizes upload controls and richer labels so hidden file inputs are included when the LLM still needs structured page context.
 - The apply controller does not scrape/enrich the listing during an apply run; the visible browser opens the job URL only from the application agent.
 - Review-required stops create human intervention records and wait for Continue Bot, Skip Application, or Mark Failed from the Progress page.
 

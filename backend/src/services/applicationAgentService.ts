@@ -1280,6 +1280,12 @@ const buildResumeUploadPayload = (resumeOption: ResumeOption) => ({
   buffer: fs.readFileSync(resumeOption.filePath)
 });
 
+const buildCoverLetterUploadPayload = (coverLetterDocument: CoverLetterDocumentSnapshot) => ({
+  name: coverLetterDocument.fileName,
+  mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  buffer: fs.readFileSync(coverLetterDocument.filePath)
+});
+
 const closeSeekLoginSessionIfOpen = async (): Promise<void> => {
   if (!seekLoginSession) {
     return;
@@ -1362,10 +1368,23 @@ const capturePageSnapshot = async (page: Page): Promise<PageSnapshot> => {
       const explicit = clean(
         element.getAttribute('aria-label') ||
           element.getAttribute('placeholder') ||
-          element.getAttribute('name')
+          element.getAttribute('name') ||
+          element.getAttribute('data-testid')
       );
       if (explicit) {
         return explicit;
+      }
+
+      const labelledBy = element.getAttribute('aria-labelledby');
+      if (labelledBy) {
+        const labelledByText = labelledBy
+          .split(/\s+/)
+          .map(id => textFrom(document.getElementById(id)))
+          .filter(Boolean)
+          .join(' ');
+        if (labelledByText) {
+          return clean(labelledByText);
+        }
       }
 
       if (element.id) {
@@ -1388,6 +1407,20 @@ const capturePageSnapshot = async (page: Page): Promise<PageSnapshot> => {
         return previousText;
       }
 
+      const legendText = textFrom(element.closest('fieldset')?.querySelector('legend') || null);
+      if (legendText) {
+        return legendText;
+      }
+
+      let parent = element.parentElement;
+      for (let depth = 0; parent && depth < 3; depth += 1) {
+        const parentText = textFrom(parent);
+        if (parentText && parentText.length <= 240) {
+          return parentText;
+        }
+        parent = parent.parentElement;
+      }
+
       return textFrom(element);
     };
 
@@ -1396,6 +1429,23 @@ const capturePageSnapshot = async (page: Page): Promise<PageSnapshot> => {
       .forEach(element => element.removeAttribute('data-llm-target-id'));
 
     const activeElement = document.activeElement as HTMLElement | null;
+
+    const getCandidateRank = (element: HTMLElement): number => {
+      const input = element as HTMLInputElement;
+      const type = 'type' in input ? (input.type || '').toLowerCase() : '';
+      const label = getLabel(element).toLowerCase();
+      let score = 0;
+
+      if (type === 'file') score += 100;
+      if (input.required) score += 20;
+      if (input.getAttribute('aria-invalid') === 'true') score += 20;
+      if (/resume|cv|cover letter|covering letter|documents?|upload|attach/.test(label)) score += 15;
+      if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+        score += 5;
+      }
+
+      return score;
+    };
 
     const candidates = Array.from(
       document.querySelectorAll(
@@ -1419,6 +1469,7 @@ const capturePageSnapshot = async (page: Page): Promise<PageSnapshot> => {
 
         return isVisible(element as HTMLElement);
       })
+      .sort((left, right) => getCandidateRank(right as HTMLElement) - getCandidateRank(left as HTMLElement))
       .slice(0, 60) as HTMLElement[];
 
     const elements = candidates.map((element, index) => {
@@ -2712,6 +2763,325 @@ const resolveCoverLetterUploadTargetId = (
   return uploadableElements.find(element => !isResumeUploadElement(element))?.id;
 };
 
+type UploadDocumentKind = 'resume' | 'cover_letter';
+
+interface DeterministicSeekResult {
+  page: Page;
+  message: string;
+  uploadedResume?: boolean;
+  uploadedCoverLetter?: boolean;
+  clickedApply?: boolean;
+  clickedContinue?: boolean;
+}
+
+const isSeekPage = (snapshot: PageSnapshot): boolean => getDomainFamily(snapshot.url) === 'seek.com.au';
+
+const isSeekJobDetailsPage = (snapshot: PageSnapshot): boolean =>
+  isSeekPage(snapshot) && /\/job\//i.test(snapshot.url) && !isSeekChooseDocumentsPage(snapshot);
+
+const isSeekChooseDocumentsPage = (snapshot: PageSnapshot): boolean => {
+  if (!isSeekPage(snapshot)) {
+    return false;
+  }
+
+  const combined = `${snapshot.title}\n${snapshot.visibleText}`.toLowerCase();
+  return (
+    /choose documents|select documents|resume.*cover letter|cover letter.*resume/.test(combined) ||
+    (snapshot.elements.some(isResumeUploadElement) && snapshot.elements.some(isCoverLetterUploadElement))
+  );
+};
+
+const markBestUploadInput = async (
+  page: Page,
+  kind: UploadDocumentKind
+): Promise<{ index: number; label: string } | null> => {
+  return page.evaluate((documentKind: UploadDocumentKind) => {
+    const clean = (value: string | null | undefined): string =>
+      (value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const targetPattern =
+      documentKind === 'cover_letter'
+        ? /cover letter|covering letter|motivation|supporting statement|letter of application/
+        : /resume|cv|curriculum vitae/;
+    const rejectPattern =
+      documentKind === 'cover_letter'
+        ? /resume|cv|curriculum vitae/
+        : /cover letter|covering letter|motivation|supporting statement|letter of application/;
+    const uploadPattern = /upload|attach|choose|select|replace|document|file/;
+
+    const textFrom = (element: Element | null): string =>
+      clean((element as HTMLElement | null)?.innerText || element?.textContent || '');
+    const contextFor = (input: HTMLInputElement): string => {
+      const parts = [
+        input.name,
+        input.id,
+        input.accept,
+        input.getAttribute('aria-label'),
+        input.getAttribute('data-testid')
+      ];
+
+      if (input.id) {
+        parts.push(textFrom(document.querySelector(`label[for="${CSS.escape(input.id)}"]`)));
+      }
+
+      const parentLabel = input.closest('label');
+      parts.push(textFrom(parentLabel));
+
+      let parent = input.parentElement;
+      for (let depth = 0; parent && depth < 5; depth += 1) {
+        const parentText = textFrom(parent);
+        if (parentText && parentText.length <= 700) {
+          parts.push(parentText);
+        }
+        parent = parent.parentElement;
+      }
+
+      return clean(parts.filter(Boolean).join(' '));
+    };
+
+    const inputs = Array.from(document.querySelectorAll('input[type="file"]')) as HTMLInputElement[];
+    const ranked = inputs
+      .map((input, index) => {
+        const context = contextFor(input);
+        let score = 0;
+        if (targetPattern.test(context)) score += 20;
+        if (uploadPattern.test(context)) score += 6;
+        if (/pdf|doc|docx/.test(clean(input.accept))) score += 4;
+        if (input.required || input.getAttribute('aria-invalid') === 'true') score += 3;
+        if (rejectPattern.test(context)) score -= 30;
+        if (documentKind === 'cover_letter' && inputs.length > 1 && index > 0) score += 2;
+        if (documentKind === 'resume' && index === 0) score += 1;
+        return { index, label: context.slice(0, 160), score };
+      })
+      .filter(candidate => candidate.score > 0)
+      .sort((left, right) => right.score - left.score || left.index - right.index);
+
+    return ranked[0] || null;
+  }, kind);
+};
+
+const uploadDocumentDirectly = async (
+  page: Page,
+  kind: UploadDocumentKind,
+  files: Parameters<ReturnType<Page['locator']>['setInputFiles']>[0]
+): Promise<string | null> => {
+  const target = await markBestUploadInput(page, kind);
+  if (!target) {
+    return null;
+  }
+
+  await page.locator('input[type="file"]').nth(target.index).setInputFiles(files, { timeout: 10000 });
+  await settlePage(page);
+  return target.label || `input ${target.index + 1}`;
+};
+
+const clickFirstVisibleByText = async (
+  page: Page,
+  selector: string,
+  pattern: RegExp
+): Promise<Page | null> => {
+  const candidates = page.locator(selector).filter({ hasText: pattern });
+  const count = Math.min(await candidates.count(), 8);
+
+  for (let index = 0; index < count; index += 1) {
+    const candidate = candidates.nth(index);
+    try {
+      if (!(await candidate.isVisible({ timeout: 500 }))) {
+        continue;
+      }
+
+      const resolved = await completeInteractivePageAction(page, async () => {
+        await candidate.click({ timeout: 5000 });
+      });
+      return resolved.page;
+    } catch {
+      // Try the next matching control.
+    }
+  }
+
+  return null;
+};
+
+const tryClickSeekFirstPageApply = async (
+  page: Page,
+  snapshot: PageSnapshot
+): Promise<DeterministicSeekResult | null> => {
+  if (!isSeekJobDetailsPage(snapshot)) {
+    return null;
+  }
+
+  const nextPage = await clickFirstVisibleByText(
+    page,
+    'a, button, [role="button"]',
+    /^\s*(apply|apply now|apply for this job)\s*$/i
+  );
+
+  return nextPage
+    ? {
+        page: nextPage,
+        message: 'Handled SEEK job page deterministically by clicking Apply.',
+        clickedApply: true
+      }
+    : null;
+};
+
+const tryClickSeekDocumentsContinue = async (page: Page): Promise<Page | null> =>
+  clickFirstVisibleByText(
+    page,
+    'button, [role="button"], a',
+    /^\s*(continue|next|save and continue|submit application)\s*$/i
+  );
+
+const tryHandleSeekChooseDocumentsPage = async (
+  page: Page,
+  snapshot: PageSnapshot,
+  activeResumeOption: ResumeOption,
+  checklist: ApplicationChecklistRuntime,
+  coverLetterDocument: CoverLetterDocumentSnapshot
+): Promise<DeterministicSeekResult | null> => {
+  if (!isSeekChooseDocumentsPage(snapshot)) {
+    return null;
+  }
+
+  const messages: string[] = [];
+  let uploadedResume = false;
+  let uploadedCoverLetter = false;
+
+  if (!checklist.resumeUploadAttempted || !checklist.resumeUploadChecked) {
+    const resumeTarget = await uploadDocumentDirectly(
+      page,
+      'resume',
+      buildResumeUploadPayload(activeResumeOption)
+    );
+    if (resumeTarget) {
+      uploadedResume = true;
+      messages.push(`uploaded resume via ${resumeTarget}`);
+    }
+  }
+
+  if (!checklist.coverLetterDocumentUploaded || !checklist.coverLetterDocumentChecked) {
+    const coverLetterTarget = await uploadDocumentDirectly(
+      page,
+      'cover_letter',
+      buildCoverLetterUploadPayload(coverLetterDocument)
+    );
+    if (coverLetterTarget) {
+      uploadedCoverLetter = true;
+      messages.push(`uploaded cover letter via ${coverLetterTarget}`);
+    }
+  }
+
+  const continuedPage = messages.length > 0 ? await tryClickSeekDocumentsContinue(page) : null;
+  if (continuedPage) {
+    messages.push('clicked Continue');
+  }
+
+  return messages.length > 0
+    ? {
+        page: continuedPage || page,
+        message: `Handled SEEK choose-documents page deterministically: ${messages.join('; ')}.`,
+        uploadedResume,
+        uploadedCoverLetter,
+        clickedContinue: Boolean(continuedPage)
+      }
+    : null;
+};
+
+const tryHandleKnownSeekPage = async (
+  page: Page,
+  snapshot: PageSnapshot,
+  activeResumeOption: ResumeOption,
+  checklist: ApplicationChecklistRuntime,
+  coverLetterDocument: CoverLetterDocumentSnapshot
+): Promise<DeterministicSeekResult | null> => {
+  return (
+    (await tryHandleSeekChooseDocumentsPage(
+      page,
+      snapshot,
+      activeResumeOption,
+      checklist,
+      coverLetterDocument
+    )) || (await tryClickSeekFirstPageApply(page, snapshot))
+  );
+};
+
+const inferUploadTriggerKind = (
+  element: PageElementSnapshot | undefined,
+  decision: AgentDecision
+): UploadDocumentKind | null => {
+  const hints = `${getElementHints(element)} ${decision.message || ''} ${decision.reasoning || ''}`;
+  const looksLikeUploadTrigger =
+    Boolean(element?.uploadable) || /upload|attach|choose|select|replace|document|file/.test(hints);
+
+  if (!looksLikeUploadTrigger) {
+    return null;
+  }
+
+  if (/cover letter|covering letter|motivation|supporting statement|letter of application/.test(hints)) {
+    return 'cover_letter';
+  }
+
+  if (/resume|cv|curriculum vitae/.test(hints)) {
+    return 'resume';
+  }
+
+  return null;
+};
+
+const executeUploadTriggerWithoutFileDialog = async (
+  page: Page,
+  decision: AgentDecision,
+  snapshot: PageSnapshot,
+  activeResumeOption: ResumeOption,
+  coverLetterDocument: CoverLetterDocumentSnapshot
+): Promise<DecisionExecutionResult | null> => {
+  const target = getSnapshotElement(snapshot, decision.targetId);
+  const kind = inferUploadTriggerKind(target, decision);
+  if (!kind) {
+    return null;
+  }
+
+  if (kind === 'cover_letter') {
+    const uploadedTarget = await uploadDocumentDirectly(
+      page,
+      'cover_letter',
+      buildCoverLetterUploadPayload(coverLetterDocument)
+    );
+    if (!uploadedTarget) {
+      return null;
+    }
+
+    return {
+      executedAction: {
+        action: 'upload_cover_letter',
+        targetId: decision.targetId,
+        coverLetterFileName: coverLetterDocument.fileName
+      },
+      page,
+      uploadedCoverLetterDocument: coverLetterDocument
+    };
+  }
+
+  const uploadedTarget = await uploadDocumentDirectly(
+    page,
+    'resume',
+    buildResumeUploadPayload(activeResumeOption)
+  );
+  if (!uploadedTarget) {
+    return null;
+  }
+
+  return {
+    executedAction: {
+      action: 'upload_resume',
+      targetId: decision.targetId,
+      resumeRef: activeResumeOption.resumeRef,
+      resumeFileName: activeResumeOption.resume.fileName
+    },
+    page,
+    nextActiveResume: activeResumeOption
+  };
+};
+
 const clearEditableTarget = async (page: Page, targetId: number, snapshot: PageSnapshot): Promise<void> => {
   const element = getSnapshotElement(snapshot, targetId);
   if (!element?.editable) {
@@ -3178,6 +3548,16 @@ const executeDecision = async (
       if (!decision.targetId) {
         throw new Error('LLM click action did not include a targetId.');
       }
+      const uploadResult = await executeUploadTriggerWithoutFileDialog(
+        page,
+        decision,
+        snapshot,
+        activeResumeOption,
+        coverLetterDocument
+      );
+      if (uploadResult) {
+        return uploadResult;
+      }
       const resolved = await completeInteractivePageAction(page, async () => {
         await (await prepareTargetLocator(page, decision.targetId!)).click({ timeout: 10000 });
       });
@@ -3190,6 +3570,16 @@ const executeDecision = async (
     case 'double_click': {
       if (!decision.targetId) {
         throw new Error('LLM double_click action did not include a targetId.');
+      }
+      const uploadResult = await executeUploadTriggerWithoutFileDialog(
+        page,
+        decision,
+        snapshot,
+        activeResumeOption,
+        coverLetterDocument
+      );
+      if (uploadResult) {
+        return uploadResult;
       }
       const resolved = await completeInteractivePageAction(page, async () => {
         await (await prepareTargetLocator(page, decision.targetId!)).dblclick({ timeout: 10000 });
@@ -3367,7 +3757,7 @@ const executeDecision = async (
         }
         locator = await prepareTargetLocator(page, resolvedTargetId, { requireVisible: false });
       }
-      await locator.setInputFiles(coverLetterDocument.filePath, { timeout: 10000 });
+      await locator.setInputFiles(buildCoverLetterUploadPayload(coverLetterDocument), { timeout: 10000 });
       await settlePage(page);
       return {
         executedAction: {
@@ -3521,6 +3911,54 @@ export const applyToJob = async (
             coverLetterDocument: lastCoverLetterDocument
           })
         };
+      }
+
+      const deterministicSeekResult = await tryHandleKnownSeekPage(
+        currentPage,
+        lastSnapshot,
+        activeResumeOption,
+        applicationChecklist,
+        activeCoverLetterDocument
+      );
+      if (deterministicSeekResult) {
+        currentPage = deterministicSeekResult.page;
+        session.page = currentPage;
+        logs.push(`Step ${step}: ${deterministicSeekResult.message}`);
+
+        if (deterministicSeekResult.uploadedResume) {
+          applicationChecklist.resumeUploadAttempted = true;
+          applicationChecklist.uploadedResumeRef = activeResumeOption.resumeRef;
+          applicationChecklist.uploadedResumeFileName = activeResumeOption.resume.fileName;
+          applicationChecklist.resumeUploadChecked = true;
+          logs.push(
+            `Step ${step} checklist - resume upload checked for "${applicationChecklist.uploadedResumeFileName}".`
+          );
+        }
+
+        if (deterministicSeekResult.uploadedCoverLetter) {
+          applicationChecklist.coverLetterDocumentUploaded = true;
+          applicationChecklist.uploadedCoverLetterFileName = activeCoverLetterDocument.fileName;
+          applicationChecklist.coverLetterDocumentChecked = true;
+          lastCoverLetterText = activeCoverLetterDocument.content;
+          lastCoverLetterDocument = activeCoverLetterDocument;
+          coverLetterDocumentUploaded = true;
+          logs.push(
+            `Step ${step} checklist - cover-letter document upload checked for "${applicationChecklist.uploadedCoverLetterFileName}".`
+          );
+        }
+
+        artifacts.push(
+          await captureRunScreenshot(
+            currentPage,
+            runArtifactsDir,
+            step,
+            deterministicSeekResult.clickedApply
+              ? `step-${step}-seek-apply`
+              : `step-${step}-seek-documents`
+          )
+        );
+        lastSnapshot = await capturePageSnapshot(currentPage);
+        continue;
       }
 
       let workingSnapshot = lastSnapshot;
