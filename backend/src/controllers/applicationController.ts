@@ -54,6 +54,8 @@ const validateApplicationProfile = (profile: any): profile is ApplicationProfile
     return true;
   }
 
+  const coverLetterExamples = profile.coverLetterExamples;
+
   return (
     typeof profile === 'object' &&
     typeof profile.fullName === 'string' &&
@@ -74,7 +76,17 @@ const validateApplicationProfile = (profile: any): profile is ApplicationProfile
     DRIVERS_LICENCE_STATUSES.includes(profile.driversLicenceStatus) &&
     CAR_ACCESS_STATUSES.includes(profile.carAccessStatus) &&
     typeof profile.salaryExpectationAnnual === 'string' &&
-    typeof profile.employerQuestionNotes === 'string'
+    typeof profile.employerQuestionNotes === 'string' &&
+    (coverLetterExamples === undefined || Array.isArray(coverLetterExamples)) &&
+    (coverLetterExamples || []).every(
+      (example: any) =>
+        example &&
+        typeof example.id === 'string' &&
+        typeof example.fileName === 'string' &&
+        (example.fileType === 'pdf' || example.fileType === 'docx') &&
+        typeof example.content === 'string' &&
+        typeof example.uploadedAt === 'string'
+    )
   );
 };
 

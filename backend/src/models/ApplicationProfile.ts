@@ -1,3 +1,5 @@
+import { CoverLetterExample } from './CoverLetterExample';
+
 export type WorkRightsStatus =
   | ''
   | 'australian_citizen_or_permanent_resident'
@@ -28,4 +30,5 @@ export interface ApplicationProfile {
   carAccessStatus: CarAccessStatus;
   salaryExpectationAnnual: string;
   employerQuestionNotes: string;
+  coverLetterExamples?: CoverLetterExample[];
 }

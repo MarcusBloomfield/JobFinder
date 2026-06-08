@@ -11,6 +11,7 @@ import openaiRoutes from './routes/openaiRoutes';
 import applicationRoutes from './routes/applicationRoutes';
 import applicationTrackingRoutes from './routes/applicationTrackingRoutes';
 import humanInterventionRoutes from './routes/humanInterventionRoutes';
+import coverLetterExampleRoutes from './routes/coverLetterExampleRoutes';
 import { initializeApplicationTracking } from './services/applicationTrackingService';
 import { initializeHumanInterventions } from './services/humanInterventionService';
 
@@ -36,6 +37,7 @@ app.use('/api/openai', openaiRoutes);
 app.use('/api/apply', applicationRoutes);
 app.use('/api/applications', applicationTrackingRoutes);
 app.use('/api/interventions', humanInterventionRoutes);
+app.use('/api/cover-letter-examples', coverLetterExampleRoutes);
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {

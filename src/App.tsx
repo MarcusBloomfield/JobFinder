@@ -49,6 +49,7 @@ const App: React.FC = () => {
             applicationHistory,
             isApplicationTrackingLoading,
             isProfileFillLoading,
+            isCoverLetterExampleLoading,
             profileFillMessage
         },
         {
@@ -63,6 +64,8 @@ const App: React.FC = () => {
             setLocation,
             setJobSearchAmount,
             updateApplicationProfile,
+            uploadCoverLetterExample,
+            removeCoverLetterExample,
             fillApplicationProfileFromResumes,
             refreshApplicationTracking,
             updateTrackedApplicationJobDetails,
@@ -138,8 +141,11 @@ const App: React.FC = () => {
                         storedResumes={storedResumes}
                         applicationHistory={applicationHistory}
                         isProfileFillLoading={isProfileFillLoading}
+                        isCoverLetterExampleLoading={isCoverLetterExampleLoading}
                         profileFillMessage={profileFillMessage}
                         onChange={updateApplicationProfile}
+                        onUploadCoverLetterExample={uploadCoverLetterExample}
+                        onRemoveCoverLetterExample={removeCoverLetterExample}
                         onFillWithAi={fillApplicationProfileFromResumes}
                     />
                 ) : (

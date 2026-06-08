@@ -19,6 +19,11 @@ const MAX_STEP_RECOVERY_ATTEMPTS = Number(process.env.APPLY_AGENT_MAX_STEP_RECOV
 const MAX_VISIBLE_TEXT_CHARS = Number(process.env.APPLY_AGENT_MAX_VISIBLE_TEXT_CHARS || 5000);
 const MAX_RESUME_CHARS = Number(process.env.APPLY_AGENT_MAX_RESUME_CHARS || 8000);
 const APPLY_AGENT_MODEL = process.env.APPLY_AGENT_MODEL || 'gpt-5.4-mini';
+const COVER_LETTER_MODEL = process.env.COVER_LETTER_MODEL || APPLY_AGENT_MODEL;
+const MAX_COVER_LETTER_EXAMPLES = Number(process.env.APPLY_AGENT_MAX_COVER_LETTER_EXAMPLES || 3);
+const MAX_COVER_LETTER_EXAMPLE_CHARS = Number(
+  process.env.APPLY_AGENT_MAX_COVER_LETTER_EXAMPLE_CHARS || 3500
+);
 const APPLY_AGENT_REASONING_EFFORT: 'medium' = 'medium';
 const APPLY_AGENT_TIMEOUT_MS = Number(process.env.APPLY_AGENT_TIMEOUT_MS || 55000);
 const ALLOW_EXTERNAL_WEBSITE_AUTOMATION =
@@ -630,6 +635,11 @@ const getProfilePreviousJobsDetails = (applicationProfile?: ApplicationProfile):
 const getProfileEducationDetails = (applicationProfile?: ApplicationProfile): string | undefined =>
   normalizeOptionalText(applicationProfile?.educationDetails);
 
+const getProfileCoverLetterExamples = (applicationProfile?: ApplicationProfile) =>
+  (applicationProfile?.coverLetterExamples || [])
+    .filter(example => normalizeOptionalText(example.content))
+    .slice(0, MAX_COVER_LETTER_EXAMPLES);
+
 const getWorkRightsAnswer = (applicationProfile?: ApplicationProfile): string | undefined => {
   if (!applicationProfile) {
     return undefined;
@@ -839,7 +849,7 @@ const createCoverLetterDocument = async (
   applicationProfile: ApplicationProfile | undefined,
   runArtifactsDir: string
 ): Promise<CoverLetterDocumentSnapshot> => {
-  const content = buildCoverLetterText(job, activeResumeOption.candidateProfile, applicationProfile);
+  const content = await buildCoverLetterDocumentText(job, activeResumeOption, applicationProfile);
   const createdAt = new Date().toISOString();
   const fileName = `${slugify(job.company)}-${slugify(job.title)}-cover-letter.docx`;
   const filePath = path.join(runArtifactsDir, fileName);
@@ -939,6 +949,65 @@ const buildCoverLetterText = (
       `${detailText} I like working with people, staying practical, and following through on the details. ` +
       `I would love the chance to bring that approach to ${companyName}.`
   );
+};
+
+const buildCoverLetterDocumentText = async (
+  job: Job,
+  activeResumeOption: ResumeOption,
+  applicationProfile?: ApplicationProfile
+): Promise<string> => {
+  const examples = getProfileCoverLetterExamples(applicationProfile);
+  if (examples.length === 0) {
+    return buildCoverLetterText(job, activeResumeOption.candidateProfile, applicationProfile);
+  }
+
+  try {
+    const response = await waitWithTimeout(
+      getOpenAIClient().chat.completions.create({
+        model: COVER_LETTER_MODEL,
+        response_format: { type: 'json_object' },
+        temperature: 0.2,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Write one concise, natural cover letter for a job application. Return only JSON with "coverLetter". ' +
+              'Use only candidate facts from the resume/profile/job payload. Do not invent experience, skills, work rights, salary, dates, employers, or qualifications. ' +
+              'Use coverLetterExamples only as style, tone, structure, and phrasing references, never as factual evidence. ' +
+              'Avoid AI-like mannerisms, em dashes, invisible formatting characters, generic hype, and over-polished wording.'
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              job: {
+                title: job.title,
+                company: job.company,
+                description: compactText(job.description, 2200)
+              },
+              candidateProfile: activeResumeOption.candidateProfile,
+              applicationProfile: buildApplicationProfileContext(applicationProfile),
+              activeResume: activeResumeOption.promptEntry,
+              resumeSummary: compactText(activeResumeOption.resume.content, MAX_RESUME_CHARS),
+              coverLetterExamples: examples.map(example => ({
+                fileName: example.fileName,
+                content: compactText(example.content, MAX_COVER_LETTER_EXAMPLE_CHARS)
+              }))
+            })
+          }
+        ]
+      }),
+      APPLY_AGENT_TIMEOUT_MS
+    );
+    const rawContent = response.choices[0]?.message.content;
+    const parsed = rawContent ? (JSON.parse(rawContent) as { coverLetter?: unknown }) : {};
+    const generatedCoverLetter =
+      typeof parsed.coverLetter === 'string' ? normalizeCoverLetterText(parsed.coverLetter) : '';
+
+    return generatedCoverLetter || buildCoverLetterText(job, activeResumeOption.candidateProfile, applicationProfile);
+  } catch (error) {
+    console.error('Cover letter example-guided generation failed:', error);
+    return buildCoverLetterText(job, activeResumeOption.candidateProfile, applicationProfile);
+  }
 };
 
 export const buildApplicationSnapshot = (

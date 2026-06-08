@@ -14,6 +14,7 @@ import {
   TrackedJobApplication
 } from '../models/ApplicationTracking';
 import { getStoredResume, listStoredResumes, parseResume } from '../services/resumeParserService';
+import { parseCoverLetterExample } from '../services/coverLetterExampleService';
 import { generateSearchTerms, evaluateJobMatch, evaluateJobMatchesBulk } from '../services/openAiService';
 import { scrapeJobs } from '../services/scrapeService';
 import {
@@ -47,6 +48,7 @@ interface JobSearchState {
   applicationHistory: TrackedJobApplication[];
   isApplicationTrackingLoading: boolean;
   isProfileFillLoading: boolean;
+  isCoverLetterExampleLoading: boolean;
   profileFillMessage: string | null;
 }
 
@@ -62,6 +64,8 @@ interface JobSearchActions {
   setLocation: (location: string) => void;
   setJobSearchAmount: (amount: number) => void;
   updateApplicationProfile: (updates: Partial<ApplicationProfile>) => void;
+  uploadCoverLetterExample: (file: File) => Promise<void>;
+  removeCoverLetterExample: (exampleId: string) => void;
   fillApplicationProfileFromResumes: () => Promise<void>;
   refreshApplicationTracking: () => Promise<void>;
   updateTrackedApplicationJobDetails: (applicationId: string, jobDetails: JobDetails) => Promise<void>;
@@ -155,6 +159,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   const [applicationHistory, setApplicationHistory] = useState<TrackedJobApplication[]>([]);
   const [isApplicationTrackingLoading, setIsApplicationTrackingLoading] = useState<boolean>(false);
   const [isProfileFillLoading, setIsProfileFillLoading] = useState<boolean>(false);
+  const [isCoverLetterExampleLoading, setIsCoverLetterExampleLoading] = useState<boolean>(false);
   const [profileFillMessage, setProfileFillMessage] = useState<string | null>(null);
 
   const upsertStoredResume = (nextResume: Resume): void => {
@@ -625,6 +630,42 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     }
   };
 
+  const uploadCoverLetterExample = async (file: File): Promise<void> => {
+    setIsCoverLetterExampleLoading(true);
+    setError(null);
+    setProfileFillMessage(null);
+
+    try {
+      const example = await parseCoverLetterExample(file);
+      setApplicationProfile(currentProfile =>
+        normalizeApplicationProfile({
+          ...currentProfile,
+          coverLetterExamples: [
+            example,
+            ...currentProfile.coverLetterExamples.filter(currentExample => currentExample.id !== example.id)
+          ].slice(0, 5)
+        })
+      );
+      setProfileFillMessage(`Added cover letter example: ${example.fileName}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to upload cover letter example';
+      setError(message);
+      console.error('Cover letter example upload error:', error);
+    } finally {
+      setIsCoverLetterExampleLoading(false);
+    }
+  };
+
+  const removeCoverLetterExample = (exampleId: string): void => {
+    setApplicationProfile(currentProfile =>
+      normalizeApplicationProfile({
+        ...currentProfile,
+        coverLetterExamples: currentProfile.coverLetterExamples.filter(example => example.id !== exampleId)
+      })
+    );
+    setProfileFillMessage(null);
+  };
+
   const updateTrackedApplicationJobDetails = async (
     applicationId: string,
     jobDetails: JobDetails
@@ -683,6 +724,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       applicationHistory,
       isApplicationTrackingLoading,
       isProfileFillLoading,
+      isCoverLetterExampleLoading,
       profileFillMessage
     },
     {
@@ -697,6 +739,8 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       setLocation: updateLocation,
       setJobSearchAmount,
       updateApplicationProfile,
+      uploadCoverLetterExample,
+      removeCoverLetterExample,
       fillApplicationProfileFromResumes,
       refreshApplicationTracking: loadApplicationTrackingData,
       updateTrackedApplicationJobDetails,

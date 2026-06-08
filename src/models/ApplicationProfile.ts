@@ -1,3 +1,5 @@
+import { CoverLetterExample } from './CoverLetterExample';
+
 export type WorkRightsStatus =
   | ''
   | 'australian_citizen_or_permanent_resident'
@@ -28,6 +30,7 @@ export interface ApplicationProfile {
   carAccessStatus: CarAccessStatus;
   salaryExpectationAnnual: string;
   employerQuestionNotes: string;
+  coverLetterExamples: CoverLetterExample[];
 }
 
 export const DEFAULT_APPLICATION_PROFILE: ApplicationProfile = {
@@ -49,7 +52,8 @@ export const DEFAULT_APPLICATION_PROFILE: ApplicationProfile = {
   driversLicenceStatus: '',
   carAccessStatus: '',
   salaryExpectationAnnual: '',
-  employerQuestionNotes: ''
+  employerQuestionNotes: '',
+  coverLetterExamples: []
 };
 
 const WORK_RIGHTS_OPTIONS: WorkRightsStatus[] = [
@@ -64,6 +68,26 @@ const DRIVERS_LICENCE_OPTIONS: DriversLicenceStatus[] = ['', 'full', 'provisiona
 const CAR_ACCESS_OPTIONS: CarAccessStatus[] = ['', 'regular_access', 'no_regular_access'];
 
 const normalizeString = (value: unknown): string => (typeof value === 'string' ? value : '').trim();
+
+const normalizeCoverLetterExamples = (value: unknown): CoverLetterExample[] =>
+  Array.isArray(value)
+    ? value
+        .filter(item => item && typeof item === 'object')
+        .map(item => {
+          const candidate = item as Record<string, unknown>;
+          const fileType = normalizeString(candidate.fileType);
+          const normalizedFileType: CoverLetterExample['fileType'] = fileType === 'pdf' ? 'pdf' : 'docx';
+
+          return {
+            id: normalizeString(candidate.id),
+            fileName: normalizeString(candidate.fileName),
+            fileType: normalizedFileType,
+            content: normalizeString(candidate.content),
+            uploadedAt: normalizeString(candidate.uploadedAt)
+          };
+        })
+        .filter(example => example.id && example.fileName && example.content)
+    : [];
 
 export const normalizeApplicationProfile = (value: unknown): ApplicationProfile => {
   if (!value || typeof value !== 'object') {
@@ -100,6 +124,7 @@ export const normalizeApplicationProfile = (value: unknown): ApplicationProfile 
       ? carAccessStatus
       : DEFAULT_APPLICATION_PROFILE.carAccessStatus,
     salaryExpectationAnnual: normalizeString(candidate.salaryExpectationAnnual),
-    employerQuestionNotes: normalizeString(candidate.employerQuestionNotes)
+    employerQuestionNotes: normalizeString(candidate.employerQuestionNotes),
+    coverLetterExamples: normalizeCoverLetterExamples(candidate.coverLetterExamples)
   };
 };

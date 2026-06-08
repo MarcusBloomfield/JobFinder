@@ -77,7 +77,8 @@ const normalizeProfile = (
     salaryExpectationAnnual:
       normalizeString(candidate.salaryExpectationAnnual) || fallback.salaryExpectationAnnual,
     employerQuestionNotes:
-      normalizeString(candidate.employerQuestionNotes) || fallback.employerQuestionNotes
+      normalizeString(candidate.employerQuestionNotes) || fallback.employerQuestionNotes,
+    coverLetterExamples: fallback.coverLetterExamples || []
   };
 };
 
@@ -128,9 +129,12 @@ export const fillApplicationProfileFromResumes = async (
       {
         role: 'user',
         content: JSON.stringify({
-          currentProfile,
+          currentProfile: {
+            ...currentProfile,
+            coverLetterExamples: []
+          },
           resumes: resumePayload,
-          profileFields: Object.keys(currentProfile)
+          profileFields: Object.keys(currentProfile).filter(field => field !== 'coverLetterExamples')
         })
       }
     ]
