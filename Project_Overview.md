@@ -165,7 +165,7 @@ JobFinder/
 
 > **Auto-apply cover letters** are generated in `backend/src/services/applicationAgentService.ts`, kept short/warm, cleaned deterministically, written to a DOCX artifact, and uploaded with the `upload_cover_letter` action. The agent is explicitly blocked from typing cover-letter or motivation text directly into website fields; if a site only accepts typed cover-letter text, it requests human review.
 
-> **Cover letter examples** can be uploaded from the Profile page as PDF/DOCX files. `POST /api/cover-letter-examples/parse` extracts text and saves the examples in the browser-saved `ApplicationProfile`; auto-apply sends up to three examples to the cover-letter generator as style-only references.
+> **Cover letter examples** can be uploaded from the front-page Resume section as PDF/DOCX files. `POST /api/cover-letter-examples/parse` extracts text and saves the examples in the browser-saved `ApplicationProfile`; auto-apply sends up to three examples to the cover-letter generator as style-only references.
 
 > **Auto-apply resumes** are selected from user-uploaded resumes only. `applicationAgentService.ts` ranks the active resume plus stored uploaded resumes by job relevance and uses the best original upload as the active resume. No tailored/generated resume file is created for auto-apply. The tracked application stores the exact uploaded resume filename and full resume text snapshot so Progress and Profile can show what was actually used for each job.
 

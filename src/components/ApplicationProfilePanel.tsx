@@ -8,11 +8,8 @@ interface ApplicationProfilePanelProps {
   storedResumes: Resume[];
   applicationHistory: TrackedJobApplication[];
   isProfileFillLoading: boolean;
-  isCoverLetterExampleLoading: boolean;
   profileFillMessage: string | null;
   onChange: (updates: Partial<ApplicationProfile>) => void;
-  onUploadCoverLetterExample: (file: File) => Promise<void>;
-  onRemoveCoverLetterExample: (exampleId: string) => void;
   onFillWithAi: () => Promise<void>;
 }
 
@@ -24,22 +21,11 @@ const ApplicationProfilePanel: React.FC<ApplicationProfilePanelProps> = ({
   storedResumes,
   applicationHistory,
   isProfileFillLoading,
-  isCoverLetterExampleLoading,
   profileFillMessage,
   onFillWithAi,
-  onUploadCoverLetterExample,
-  onRemoveCoverLetterExample,
   onChange
 }) => {
   const canFillWithAi = storedResumes.some(storedResume => storedResume.content.trim());
-  const handleCoverLetterExampleUpload = (event: React.ChangeEvent<HTMLInputElement>): void => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-
-    if (file) {
-      void onUploadCoverLetterExample(file);
-    }
-  };
 
   return (
     <>
@@ -283,50 +269,6 @@ const ApplicationProfilePanel: React.FC<ApplicationProfilePanelProps> = ({
               onChange={(event) => onChange({ employerQuestionNotes: event.target.value })}
             />
           </label>
-
-          <div className="application-profile-subheading">Cover letter examples</div>
-
-          <div className="application-profile-field application-profile-field-wide">
-            <span>Upload example cover letters</span>
-            <div className="cover-letter-example-upload">
-              <label className="cover-letter-example-upload-button">
-                {isCoverLetterExampleLoading ? 'Uploading...' : 'Upload PDF or DOCX'}
-                <input
-                  type="file"
-                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                  disabled={isCoverLetterExampleLoading}
-                  onChange={handleCoverLetterExampleUpload}
-                />
-              </label>
-            </div>
-
-            {profile.coverLetterExamples.length > 0 ? (
-              <div className="cover-letter-example-list">
-                {profile.coverLetterExamples.map(example => (
-                  <div key={example.id} className="cover-letter-example-card">
-                    <div>
-                      <strong>{example.fileName}</strong>
-                      <span>
-                        {example.fileType.toUpperCase()}
-                        {example.uploadedAt ? ` - ${new Date(example.uploadedAt).toLocaleDateString()}` : ''}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      className="cover-letter-example-remove"
-                      onClick={() => onRemoveCoverLetterExample(example.id)}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="application-profile-description">
-                No cover letter examples uploaded yet.
-              </p>
-            )}
-          </div>
         </div>
       </section>
 

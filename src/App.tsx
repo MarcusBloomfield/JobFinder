@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import ResumeUploader from './components/ResumeUploader';
+import CoverLetterExampleUploader from './components/CoverLetterExampleUploader';
 import ApplicationProfilePanel from './components/ApplicationProfilePanel';
 import ApplicationProgressPanel from './components/ApplicationProgressPanel';
 import SearchTerms from './components/SearchTerms';
@@ -50,6 +51,7 @@ const App: React.FC = () => {
             isApplicationTrackingLoading,
             isProfileFillLoading,
             isCoverLetterExampleLoading,
+            coverLetterExampleMessage,
             profileFillMessage
         },
         {
@@ -141,11 +143,8 @@ const App: React.FC = () => {
                         storedResumes={storedResumes}
                         applicationHistory={applicationHistory}
                         isProfileFillLoading={isProfileFillLoading}
-                        isCoverLetterExampleLoading={isCoverLetterExampleLoading}
                         profileFillMessage={profileFillMessage}
                         onChange={updateApplicationProfile}
-                        onUploadCoverLetterExample={uploadCoverLetterExample}
-                        onRemoveCoverLetterExample={removeCoverLetterExample}
                         onFillWithAi={fillApplicationProfileFromResumes}
                     />
                 ) : (
@@ -199,6 +198,13 @@ const App: React.FC = () => {
                                 selectedResumeId={resume?.id}
                                 isLoading={isLoading}
                                 isStoredResumesLoading={isStoredResumesLoading}
+                            />
+                            <CoverLetterExampleUploader
+                                examples={applicationProfile.coverLetterExamples}
+                                isLoading={isCoverLetterExampleLoading}
+                                message={coverLetterExampleMessage}
+                                onUpload={uploadCoverLetterExample}
+                                onRemove={removeCoverLetterExample}
                             />
                         </div>
 

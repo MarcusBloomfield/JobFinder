@@ -49,6 +49,7 @@ interface JobSearchState {
   isApplicationTrackingLoading: boolean;
   isProfileFillLoading: boolean;
   isCoverLetterExampleLoading: boolean;
+  coverLetterExampleMessage: string | null;
   profileFillMessage: string | null;
 }
 
@@ -160,6 +161,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   const [isApplicationTrackingLoading, setIsApplicationTrackingLoading] = useState<boolean>(false);
   const [isProfileFillLoading, setIsProfileFillLoading] = useState<boolean>(false);
   const [isCoverLetterExampleLoading, setIsCoverLetterExampleLoading] = useState<boolean>(false);
+  const [coverLetterExampleMessage, setCoverLetterExampleMessage] = useState<string | null>(null);
   const [profileFillMessage, setProfileFillMessage] = useState<string | null>(null);
 
   const upsertStoredResume = (nextResume: Resume): void => {
@@ -611,6 +613,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
 
     setIsProfileFillLoading(true);
     setError(null);
+    setCoverLetterExampleMessage(null);
     setProfileFillMessage(null);
 
     try {
@@ -633,7 +636,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   const uploadCoverLetterExample = async (file: File): Promise<void> => {
     setIsCoverLetterExampleLoading(true);
     setError(null);
-    setProfileFillMessage(null);
+    setCoverLetterExampleMessage(null);
 
     try {
       const example = await parseCoverLetterExample(file);
@@ -646,7 +649,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
           ].slice(0, 5)
         })
       );
-      setProfileFillMessage(`Added cover letter example: ${example.fileName}`);
+      setCoverLetterExampleMessage(`Added cover letter example: ${example.fileName}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to upload cover letter example';
       setError(message);
@@ -663,7 +666,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
         coverLetterExamples: currentProfile.coverLetterExamples.filter(example => example.id !== exampleId)
       })
     );
-    setProfileFillMessage(null);
+    setCoverLetterExampleMessage(null);
   };
 
   const updateTrackedApplicationJobDetails = async (
@@ -725,6 +728,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       isApplicationTrackingLoading,
       isProfileFillLoading,
       isCoverLetterExampleLoading,
+      coverLetterExampleMessage,
       profileFillMessage
     },
     {
