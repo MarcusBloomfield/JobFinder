@@ -1258,6 +1258,26 @@ const resolveResumeFilePath = (resume: Resume): string => {
   return resolved;
 };
 
+const getResumeUploadMimeType = (resume: Resume): string =>
+  resume.fileType === 'pdf'
+    ? 'application/pdf'
+    : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+const getResumeUploadFileName = (resume: Resume): string => {
+  const safeOriginalName = path.basename(resume.fileName || '').trim();
+  if (safeOriginalName) {
+    return safeOriginalName;
+  }
+
+  return `resume.${resume.fileType}`;
+};
+
+const buildResumeUploadPayload = (resumeOption: ResumeOption) => ({
+  name: getResumeUploadFileName(resumeOption.resume),
+  mimeType: getResumeUploadMimeType(resumeOption.resume),
+  buffer: fs.readFileSync(resumeOption.filePath)
+});
+
 const closeSeekLoginSessionIfOpen = async (): Promise<void> => {
   if (!seekLoginSession) {
     return;
@@ -3314,7 +3334,7 @@ const executeDecision = async (
         }
         locator = await prepareTargetLocator(page, resolvedTargetId, { requireVisible: false });
       }
-      await locator.setInputFiles(selectedResumeOption.filePath, { timeout: 10000 });
+      await locator.setInputFiles(buildResumeUploadPayload(selectedResumeOption), { timeout: 10000 });
       await settlePage(page);
       return {
         executedAction: {
