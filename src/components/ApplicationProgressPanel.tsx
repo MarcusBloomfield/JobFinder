@@ -883,10 +883,20 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
                 <h4>Cover Letter</h4>
                 <span>
                   {selectedApplication.coverLetterUsed
-                    ? 'Captured from the text used during the application'
-                    : 'Stored draft generated for this application run'}
+                    ? 'Generated document uploaded during the application'
+                    : 'Stored document draft generated for this application run'}
                 </span>
               </div>
+              {selectedApplication.coverLetterDocument?.url && (
+                <a
+                  className="application-detail-generated-resume-link"
+                  href={selectedApplication.coverLetterDocument.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open Cover Letter Document
+                </a>
+              )}
               <div className="application-detail-cover-letter-body">
                 {selectedApplication.coverLetterText ? (
                   <p>{selectedApplication.coverLetterText}</p>

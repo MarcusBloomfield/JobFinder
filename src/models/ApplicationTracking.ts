@@ -25,6 +25,18 @@ export interface TailoredResumeSnapshot {
   createdAt: string;
 }
 
+export interface CoverLetterDocumentSnapshot {
+  id: string;
+  fileName: string;
+  fileType: 'docx';
+  content: string;
+  filePath: string;
+  url: string;
+  sourceResumeId: string;
+  sourceResumeFileName: string;
+  createdAt: string;
+}
+
 export interface TrackedJobApplication {
   id: string;
   jobId: string;
@@ -45,6 +57,7 @@ export interface TrackedJobApplication {
   tailoredResume?: TailoredResumeSnapshot;
   coverLetterText?: string;
   coverLetterUsed: boolean;
+  coverLetterDocument?: CoverLetterDocumentSnapshot;
   triggerSource: ApplicationTriggerSource;
   status: TrackedApplicationStatus;
   message: string;

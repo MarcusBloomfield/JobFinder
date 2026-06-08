@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import {
   ApplicationArtifact,
   ApplicationSnapshot,
+  CoverLetterDocumentSnapshot,
   JobApplicationResult,
   TailoredResumeSnapshot,
   buildApplicationSnapshot
@@ -19,7 +20,6 @@ type SqliteStatement = {
   get: <T>(...params: unknown[]) => T | undefined;
   all: <T>(...params: unknown[]) => T[];
 };
-
 type SqliteDatabase = {
   exec: (sql: string) => void;
   prepare: (sql: string) => SqliteStatement;
@@ -53,6 +53,7 @@ export interface TrackedJobApplication {
   tailoredResume?: TailoredResumeSnapshot;
   coverLetterText?: string;
   coverLetterUsed: boolean;
+  coverLetterDocument?: CoverLetterDocumentSnapshot;
   triggerSource: ApplicationTriggerSource;
   status: TrackedApplicationStatus;
   message: string;
@@ -111,6 +112,13 @@ interface TrackedApplicationRow {
   tailored_resume_json: string | null;
   cover_letter_text: string | null;
   cover_letter_used: number;
+  cover_letter_document_json: string | null;
+  cover_letter_file_name: string | null;
+  cover_letter_file_path: string | null;
+  cover_letter_url: string | null;
+  cover_letter_source_resume_id: string | null;
+  cover_letter_source_resume_file_name: string | null;
+  cover_letter_created_at: string | null;
   trigger_source: ApplicationTriggerSource;
   status: TrackedApplicationStatus;
   message: string;
@@ -371,6 +379,15 @@ const getDatabase = (): SqliteDatabase => {
       resume_is_tailored INTEGER NOT NULL DEFAULT 0,
       resume_source_file_name TEXT,
       tailored_resume_json TEXT,
+      cover_letter_text TEXT,
+      cover_letter_used INTEGER NOT NULL DEFAULT 0,
+      cover_letter_document_json TEXT,
+      cover_letter_file_name TEXT,
+      cover_letter_file_path TEXT,
+      cover_letter_url TEXT,
+      cover_letter_source_resume_id TEXT,
+      cover_letter_source_resume_file_name TEXT,
+      cover_letter_created_at TEXT,
       application_profile_json TEXT NOT NULL,
       trigger_source TEXT NOT NULL,
       status TEXT NOT NULL,
@@ -407,6 +424,34 @@ const getDatabase = (): SqliteDatabase => {
     database.exec(`ALTER TABLE job_applications ADD COLUMN cover_letter_used INTEGER NOT NULL DEFAULT 0`);
   }
 
+  if (!knownColumns.has('cover_letter_document_json')) {
+    database.exec(`ALTER TABLE job_applications ADD COLUMN cover_letter_document_json TEXT`);
+  }
+
+  if (!knownColumns.has('cover_letter_file_name')) {
+    database.exec(`ALTER TABLE job_applications ADD COLUMN cover_letter_file_name TEXT`);
+  }
+
+  if (!knownColumns.has('cover_letter_file_path')) {
+    database.exec(`ALTER TABLE job_applications ADD COLUMN cover_letter_file_path TEXT`);
+  }
+
+  if (!knownColumns.has('cover_letter_url')) {
+    database.exec(`ALTER TABLE job_applications ADD COLUMN cover_letter_url TEXT`);
+  }
+
+  if (!knownColumns.has('cover_letter_source_resume_id')) {
+    database.exec(`ALTER TABLE job_applications ADD COLUMN cover_letter_source_resume_id TEXT`);
+  }
+
+  if (!knownColumns.has('cover_letter_source_resume_file_name')) {
+    database.exec(`ALTER TABLE job_applications ADD COLUMN cover_letter_source_resume_file_name TEXT`);
+  }
+
+  if (!knownColumns.has('cover_letter_created_at')) {
+    database.exec(`ALTER TABLE job_applications ADD COLUMN cover_letter_created_at TEXT`);
+  }
+
   if (!knownColumns.has('job_details_json')) {
     database.exec(`ALTER TABLE job_applications ADD COLUMN job_details_json TEXT NOT NULL DEFAULT '{}'`);
   }
@@ -430,6 +475,35 @@ const getDatabase = (): SqliteDatabase => {
   return database;
 };
 
+const getCoverLetterDocumentFromRow = (
+  row: TrackedApplicationRow
+): CoverLetterDocumentSnapshot | undefined => {
+  const parsedDocument = parseJsonObject<CoverLetterDocumentSnapshot>(
+    row.cover_letter_document_json,
+    undefined
+  );
+  if (parsedDocument) {
+    return parsedDocument;
+  }
+
+  const fileName = normalizeOptionalText(row.cover_letter_file_name);
+  if (!fileName) {
+    return undefined;
+  }
+
+  return {
+    id: `${row.id}-cover-letter`,
+    fileName,
+    fileType: 'docx',
+    content: normalizeOptionalText(row.cover_letter_text) || '',
+    filePath: normalizeOptionalText(row.cover_letter_file_path) || '',
+    url: normalizeOptionalText(row.cover_letter_url) || '',
+    sourceResumeId: normalizeOptionalText(row.cover_letter_source_resume_id) || row.resume_id,
+    sourceResumeFileName:
+      normalizeOptionalText(row.cover_letter_source_resume_file_name) || row.resume_file_name,
+    createdAt: normalizeOptionalText(row.cover_letter_created_at) || row.created_at
+  };
+};
 const mapTrackedApplicationRow = (row: TrackedApplicationRow): TrackedJobApplication => ({
   id: row.id,
   jobId: row.job_id,
@@ -455,6 +529,7 @@ const mapTrackedApplicationRow = (row: TrackedApplicationRow): TrackedJobApplica
   tailoredResume: parseJsonObject<TailoredResumeSnapshot>(row.tailored_resume_json, undefined),
   coverLetterText: normalizeOptionalText(row.cover_letter_text),
   coverLetterUsed: Boolean(row.cover_letter_used),
+  coverLetterDocument: getCoverLetterDocumentFromRow(row),
   triggerSource: row.trigger_source,
   status: row.status,
   message: row.message,
@@ -491,6 +566,13 @@ const getLatestTrackedApplicationByNormalizedUrl = (normalizedJobUrl: string): T
           tailored_resume_json,
           cover_letter_text,
           cover_letter_used,
+          cover_letter_document_json,
+          cover_letter_file_name,
+          cover_letter_file_path,
+          cover_letter_url,
+          cover_letter_source_resume_id,
+          cover_letter_source_resume_file_name,
+          cover_letter_created_at,
           trigger_source,
           status,
           message,
@@ -682,6 +764,13 @@ export const createTrackedApplication = (
           tailored_resume_json,
           cover_letter_text,
           cover_letter_used,
+          cover_letter_document_json,
+          cover_letter_file_name,
+          cover_letter_file_path,
+          cover_letter_url,
+          cover_letter_source_resume_id,
+          cover_letter_source_resume_file_name,
+          cover_letter_created_at,
           application_profile_json,
           trigger_source,
           status,
@@ -693,7 +782,7 @@ export const createTrackedApplication = (
           created_at,
           updated_at,
           completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     )
     .run(
@@ -717,6 +806,13 @@ export const createTrackedApplication = (
       applicationSnapshot.tailoredResume ? JSON.stringify(applicationSnapshot.tailoredResume) : null,
       applicationSnapshot.coverLetterText || null,
       applicationSnapshot.coverLetterUsed ? 1 : 0,
+      applicationSnapshot.coverLetterDocument ? JSON.stringify(applicationSnapshot.coverLetterDocument) : null,
+      applicationSnapshot.coverLetterDocument?.fileName || null,
+      applicationSnapshot.coverLetterDocument?.filePath || null,
+      applicationSnapshot.coverLetterDocument?.url || null,
+      applicationSnapshot.coverLetterDocument?.sourceResumeId || null,
+      applicationSnapshot.coverLetterDocument?.sourceResumeFileName || null,
+      applicationSnapshot.coverLetterDocument?.createdAt || null,
       JSON.stringify(applicationProfile || null),
       safeTriggerSource,
       'applying',
@@ -750,6 +846,7 @@ export const createTrackedApplication = (
     tailoredResume: applicationSnapshot.tailoredResume,
     coverLetterText: applicationSnapshot.coverLetterText,
     coverLetterUsed: applicationSnapshot.coverLetterUsed,
+    coverLetterDocument: applicationSnapshot.coverLetterDocument,
     triggerSource: safeTriggerSource,
     status: 'applying',
     message: 'Launching application agent...',
@@ -789,6 +886,13 @@ export const finalizeTrackedApplication = (
           tailored_resume_json = ?,
           cover_letter_text = ?,
           cover_letter_used = ?,
+          cover_letter_document_json = ?,
+          cover_letter_file_name = ?,
+          cover_letter_file_path = ?,
+          cover_letter_url = ?,
+          cover_letter_source_resume_id = ?,
+          cover_letter_source_resume_file_name = ?,
+          cover_letter_created_at = ?,
           job_details_json = ?,
           updated_at = ?,
           completed_at = ?
@@ -810,6 +914,13 @@ export const finalizeTrackedApplication = (
       applicationSnapshot.tailoredResume ? JSON.stringify(applicationSnapshot.tailoredResume) : null,
       applicationSnapshot.coverLetterText || null,
       applicationSnapshot.coverLetterUsed ? 1 : 0,
+      applicationSnapshot.coverLetterDocument ? JSON.stringify(applicationSnapshot.coverLetterDocument) : null,
+      applicationSnapshot.coverLetterDocument?.fileName || null,
+      applicationSnapshot.coverLetterDocument?.filePath || null,
+      applicationSnapshot.coverLetterDocument?.url || null,
+      applicationSnapshot.coverLetterDocument?.sourceResumeId || null,
+      applicationSnapshot.coverLetterDocument?.sourceResumeFileName || null,
+      applicationSnapshot.coverLetterDocument?.createdAt || null,
       JSON.stringify(jobDetails),
       now,
       now,
@@ -1035,6 +1146,13 @@ export const getTrackedApplicationById = (applicationId: string): TrackedJobAppl
           tailored_resume_json,
           cover_letter_text,
           cover_letter_used,
+          cover_letter_document_json,
+          cover_letter_file_name,
+          cover_letter_file_path,
+          cover_letter_url,
+          cover_letter_source_resume_id,
+          cover_letter_source_resume_file_name,
+          cover_letter_created_at,
           trigger_source,
           status,
           message,
@@ -1080,6 +1198,13 @@ export const listTrackedApplications = (limit = DEFAULT_HISTORY_LIMIT): TrackedJ
           tailored_resume_json,
           cover_letter_text,
           cover_letter_used,
+          cover_letter_document_json,
+          cover_letter_file_name,
+          cover_letter_file_path,
+          cover_letter_url,
+          cover_letter_source_resume_id,
+          cover_letter_source_resume_file_name,
+          cover_letter_created_at,
           trigger_source,
           status,
           message,
@@ -1118,9 +1243,19 @@ const listAllTrackedApplications = (): TrackedJobApplication[] => {
           job_details_json,
           resume_id,
           resume_file_name,
+          resume_content,
+          resume_is_tailored,
+          resume_source_file_name,
           tailored_resume_json,
           cover_letter_text,
           cover_letter_used,
+          cover_letter_document_json,
+          cover_letter_file_name,
+          cover_letter_file_path,
+          cover_letter_url,
+          cover_letter_source_resume_id,
+          cover_letter_source_resume_file_name,
+          cover_letter_created_at,
           trigger_source,
           status,
           message,

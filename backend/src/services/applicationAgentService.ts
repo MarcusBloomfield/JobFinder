@@ -1,5 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
+import { Document, Packer, Paragraph, TextRun } from 'docx';
 import OpenAI from 'openai';
 import { BrowserContext, chromium, Page } from 'playwright';
 import { ApplicationProfile } from '../models/ApplicationProfile';
@@ -205,6 +207,7 @@ type BrowserActionType =
   | 'select'
   | 'check'
   | 'upload_resume'
+  | 'upload_cover_letter'
   | 'press'
   | 'scroll'
   | 'scroll_into_view'
@@ -235,6 +238,7 @@ interface ExecutedAction {
   targetId?: number;
   resumeRef?: string;
   resumeFileName?: string;
+  coverLetterFileName?: string;
   text?: string;
   option?: string;
   checked?: boolean;
@@ -254,6 +258,7 @@ interface DecisionExecutionResult {
   pageChangeMessage?: string;
   nextActiveResume?: ResumeOption;
   capturedCoverLetterText?: string;
+  uploadedCoverLetterDocument?: CoverLetterDocumentSnapshot;
 }
 
 interface BrowserSession {
@@ -268,6 +273,9 @@ interface ApplicationChecklistRuntime {
   resumeUploadChecked: boolean;
   uploadedResumeRef?: string;
   uploadedResumeFileName?: string;
+  coverLetterDocumentUploaded: boolean;
+  coverLetterDocumentChecked: boolean;
+  uploadedCoverLetterFileName?: string;
 }
 
 interface ApplicationChecklistContext {
@@ -287,6 +295,23 @@ interface ApplicationChecklistContext {
       accept: string | null;
     }>;
     uploadRequiredOnCurrentPage: boolean;
+    coverLetterDocumentFileName: string;
+    coverLetterDocumentUploaded: boolean;
+    uploadedCoverLetterFileName: string | null;
+    coverLetterDocumentChecked: boolean;
+    visibleCoverLetterUploadTargets: Array<{
+      id: number;
+      label: string;
+      required: boolean;
+      invalid: boolean;
+      accept: string | null;
+    }>;
+    visibleCoverLetterTextTargets: Array<{
+      id: number;
+      label: string;
+      required: boolean;
+      invalid: boolean;
+    }>;
   };
   outstanding: string[];
 }
@@ -312,6 +337,18 @@ export interface TailoredResumeSnapshot {
   createdAt: string;
 }
 
+export interface CoverLetterDocumentSnapshot {
+  id: string;
+  fileName: string;
+  fileType: 'docx';
+  content: string;
+  filePath: string;
+  url: string;
+  sourceResumeId: string;
+  sourceResumeFileName: string;
+  createdAt: string;
+}
+
 export interface ApplicationSnapshot {
   resumeId: string;
   resumeFileName: string;
@@ -321,6 +358,7 @@ export interface ApplicationSnapshot {
   tailoredResume?: TailoredResumeSnapshot;
   coverLetterText?: string;
   coverLetterUsed: boolean;
+  coverLetterDocument?: CoverLetterDocumentSnapshot;
 }
 
 export interface JobApplicationResult {
@@ -437,6 +475,12 @@ const normalizeCoverLetterText = (value: string): string => {
 
 const isCoverLetterFieldKind = (fieldKind: string): boolean =>
   fieldKind === 'cover_letter' || fieldKind === 'motivation';
+
+const splitDocumentLines = (value: string): string[] =>
+  value
+    .split(/\n+/)
+    .map(line => line.trim())
+    .filter(Boolean);
 
 const tokenizeResumeScoringText = (value: string): string[] =>
   value
@@ -789,6 +833,52 @@ const toArtifactUrl = (absolutePath: string): string => {
   return `${ARTIFACTS_BASE_URL}/${relativePath.replace(/\\/g, '/')}`;
 };
 
+const createCoverLetterDocument = async (
+  job: Job,
+  activeResumeOption: ResumeOption,
+  applicationProfile: ApplicationProfile | undefined,
+  runArtifactsDir: string
+): Promise<CoverLetterDocumentSnapshot> => {
+  const content = buildCoverLetterText(job, activeResumeOption.candidateProfile, applicationProfile);
+  const createdAt = new Date().toISOString();
+  const fileName = `${slugify(job.company)}-${slugify(job.title)}-cover-letter.docx`;
+  const filePath = path.join(runArtifactsDir, fileName);
+  const document = new Document({
+    sections: [
+      {
+        children: [
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: `Cover letter - ${job.company} - ${job.title}`,
+                bold: true,
+                size: 28
+              })
+            ]
+          }),
+          new Paragraph({ text: '' }),
+          ...splitDocumentLines(content).map(line => new Paragraph({ children: [new TextRun(line)] }))
+        ]
+      }
+    ]
+  });
+
+  const buffer = await Packer.toBuffer(document);
+  fs.writeFileSync(filePath, buffer);
+
+  return {
+    id: randomUUID(),
+    fileName,
+    fileType: 'docx',
+    content,
+    filePath,
+    url: toArtifactUrl(filePath),
+    sourceResumeId: activeResumeOption.resume.id,
+    sourceResumeFileName: activeResumeOption.resume.fileName,
+    createdAt
+  };
+};
+
 const estimateCareerYears = (resume: Resume): number | undefined => {
   const experienceSource =
     resume.experience && resume.experience.length > 0
@@ -854,7 +944,7 @@ const buildCoverLetterText = (
 export const buildApplicationSnapshot = (
   job: Job,
   resume: Resume,
-  overrides?: Partial<Pick<ApplicationSnapshot, 'coverLetterText' | 'coverLetterUsed'>>
+  overrides?: Partial<Pick<ApplicationSnapshot, 'coverLetterText' | 'coverLetterUsed' | 'coverLetterDocument'>>
 ): ApplicationSnapshot => {
   const candidateProfile = extractCandidateProfile(resume);
 
@@ -865,14 +955,15 @@ export const buildApplicationSnapshot = (
     resumeIsTailored: false,
     resumeSourceFileName: resume.fileName,
     coverLetterText: overrides?.coverLetterText ?? buildCoverLetterText(job, candidateProfile),
-    coverLetterUsed: overrides?.coverLetterUsed ?? false
+    coverLetterUsed: overrides?.coverLetterUsed ?? false,
+    coverLetterDocument: overrides?.coverLetterDocument
   };
 };
 
 const buildApplicationSnapshotFromOption = (
   job: Job,
   resumeOption: ResumeOption,
-  overrides?: Partial<Pick<ApplicationSnapshot, 'coverLetterText' | 'coverLetterUsed'>>
+  overrides?: Partial<Pick<ApplicationSnapshot, 'coverLetterText' | 'coverLetterUsed' | 'coverLetterDocument'>>
 ): ApplicationSnapshot => buildApplicationSnapshot(job, resumeOption.resume, overrides);
 
 const buildCandidateSummaryText = (
@@ -1393,6 +1484,7 @@ const validateDecision = (value: unknown): AgentDecision => {
     'select',
     'check',
     'upload_resume',
+    'upload_cover_letter',
     'press',
     'scroll',
     'scroll_into_view',
@@ -2134,7 +2226,9 @@ const createApplicationChecklistRuntime = (
   selectedResumeRef: activeResumeOption.resumeRef,
   selectedResumeFileName: activeResumeOption.resume.fileName,
   resumeUploadAttempted: false,
-  resumeUploadChecked: false
+  resumeUploadChecked: false,
+  coverLetterDocumentUploaded: false,
+  coverLetterDocumentChecked: false
 });
 
 const syncChecklistActiveResume = (
@@ -2157,10 +2251,34 @@ const isResumeUploadElement = (element: PageElementSnapshot): boolean => {
 const getResumeUploadElements = (snapshot: PageSnapshot): PageElementSnapshot[] =>
   snapshot.elements.filter(isResumeUploadElement);
 
+const isCoverLetterUploadElement = (element: PageElementSnapshot): boolean => {
+  if (!element.uploadable || element.disabled || element.hidden) {
+    return false;
+  }
+
+  const hints = getElementHints(element);
+  return /cover letter|covering letter|motivation|supporting statement|letter of application/.test(hints);
+};
+
+const getCoverLetterUploadElements = (snapshot: PageSnapshot): PageElementSnapshot[] =>
+  snapshot.elements.filter(isCoverLetterUploadElement);
+
+const isCoverLetterTextElement = (element: PageElementSnapshot): boolean => {
+  if (!element.editable || element.disabled || element.hidden) {
+    return false;
+  }
+
+  return elementMatchesFieldKind(element, 'cover_letter') || elementMatchesFieldKind(element, 'motivation');
+};
+
+const getCoverLetterTextElements = (snapshot: PageSnapshot): PageElementSnapshot[] =>
+  snapshot.elements.filter(isCoverLetterTextElement);
+
 const buildApplicationChecklistContext = (
   activeResumeOption: ResumeOption,
   checklist: ApplicationChecklistRuntime,
-  snapshot: PageSnapshot
+  snapshot: PageSnapshot,
+  coverLetterDocument: CoverLetterDocumentSnapshot
 ): ApplicationChecklistContext => {
   const visibleResumeUploadTargets = getResumeUploadElements(snapshot).map(element => ({
     id: element.id,
@@ -2172,6 +2290,19 @@ const buildApplicationChecklistContext = (
   const uploadRequiredOnCurrentPage = visibleResumeUploadTargets.some(
     target => target.required || target.invalid
   );
+  const visibleCoverLetterUploadTargets = getCoverLetterUploadElements(snapshot).map(element => ({
+    id: element.id,
+    label: compactText(element.label || element.name || element.text || 'Cover letter upload', 120),
+    required: Boolean(element.required),
+    invalid: Boolean(element.invalid),
+    accept: element.accept || null
+  }));
+  const visibleCoverLetterTextTargets = getCoverLetterTextElements(snapshot).map(element => ({
+    id: element.id,
+    label: compactText(element.label || element.name || element.text || 'Cover letter text field', 120),
+    required: Boolean(element.required),
+    invalid: Boolean(element.invalid)
+  }));
   const outstanding: string[] = [];
 
   if (visibleResumeUploadTargets.length > 0 && !checklist.resumeUploadAttempted) {
@@ -2192,12 +2323,29 @@ const buildApplicationChecklistContext = (
     outstanding.push('Review visible validation messages and correct blocked fields before submitting.');
   }
 
+  if (visibleCoverLetterUploadTargets.length > 0 && !checklist.coverLetterDocumentUploaded) {
+    outstanding.push(
+      `Upload the generated cover-letter document "${coverLetterDocument.fileName}" to the visible cover-letter upload field.`
+    );
+  }
+
+  if (checklist.coverLetterDocumentUploaded && !checklist.coverLetterDocumentChecked) {
+    outstanding.push('Check the page after the cover-letter document upload and correct it if the file was not accepted.');
+  }
+
+  if (visibleCoverLetterTextTargets.length > 0) {
+    outstanding.push(
+      'Do not type cover-letter or motivation text into website text fields. Use a cover-letter document upload field, or request user review if the website only accepts typed cover-letter text.'
+    );
+  }
+
   return {
     mustCompleteBeforeDone: [
       'Confirm the active resume is the best uploaded resume for this job.',
       'Upload the active resume when a resume/CV field is visible, required, invalid, or expected by the application.',
       'After upload, check the page state, visible file name when available, and validation messages to ensure the correct resume was accepted.',
-      'Fill required contact, profile, work-rights, screening, and cover-letter fields from the resume/applicationProfile.',
+      'Fill required contact, profile, work-rights, and screening fields from the resume/applicationProfile.',
+      'Never type a cover letter directly into the website. Cover letters must be written to the generated DOCX and uploaded.',
       'Correct inaccurate prefilled answers, weak drafts, and visible validation errors.',
       'Use done only after submission is confirmed, or after all essential checklist items are complete and only non-essential follow-up remains.'
     ],
@@ -2209,7 +2357,13 @@ const buildApplicationChecklistContext = (
       uploadedResumeFileName: checklist.uploadedResumeFileName || null,
       resumeUploadChecked: checklist.resumeUploadChecked,
       visibleResumeUploadTargets,
-      uploadRequiredOnCurrentPage
+      uploadRequiredOnCurrentPage,
+      coverLetterDocumentFileName: coverLetterDocument.fileName,
+      coverLetterDocumentUploaded: checklist.coverLetterDocumentUploaded,
+      uploadedCoverLetterFileName: checklist.uploadedCoverLetterFileName || null,
+      coverLetterDocumentChecked: checklist.coverLetterDocumentChecked,
+      visibleCoverLetterUploadTargets,
+      visibleCoverLetterTextTargets
     },
     outstanding
   };
@@ -2232,6 +2386,21 @@ const getChecklistDoneBlocker = (
     return 'Checklist incomplete: a required or invalid resume/CV upload field still needs to be uploaded and checked.';
   }
 
+  if (
+    checklistContext.state.visibleCoverLetterUploadTargets.length > 0 &&
+    !checklistContext.state.coverLetterDocumentUploaded
+  ) {
+    return `Checklist incomplete: a cover-letter upload field is visible, but "${checklistContext.state.coverLetterDocumentFileName}" has not been uploaded yet.`;
+  }
+
+  if (
+    checklistContext.state.visibleCoverLetterTextTargets.length > 0 &&
+    checklistContext.state.visibleCoverLetterUploadTargets.length === 0 &&
+    decision.finalStatus !== 'review_required'
+  ) {
+    return 'Checklist incomplete: the page only shows a typed cover-letter/motivation field. Do not type it; request user review instead.';
+  }
+
   if (checklistContext.outstanding.some(item => item.toLowerCase().includes('validation'))) {
     return 'Checklist incomplete: visible validation messages need to be resolved before finishing.';
   }
@@ -2246,6 +2415,7 @@ const planNextAction = async (
   applicationProfile: ApplicationProfile | undefined,
   snapshot: PageSnapshot,
   checklistContext: ApplicationChecklistContext,
+  coverLetterDocument: CoverLetterDocumentSnapshot,
   logs: string[],
   extraInstruction?: string,
   attemptFeedback?: string
@@ -2278,10 +2448,10 @@ const planNextAction = async (
             'When checking a resume upload, compare the accepted filename or page feedback when visible, review validation messages, and replace the file if it is missing or not the active resume. ' +
             'Prefer concise professional answers. ' +
             'You have a Playwright-backed browser toolset, not raw code execution. ' +
-            'Use these actions only: click, double_click, hover, focus, clear, type, select, check, upload_resume, press, scroll, scroll_into_view, wait, wait_for_text, go_back, reload, done, fail. ' +
+            'Use these actions only: click, double_click, hover, focus, clear, type, select, check, upload_resume, upload_cover_letter, press, scroll, scroll_into_view, wait, wait_for_text, go_back, reload, done, fail. ' +
             'External employer pages, redirects, and new tabs are supported. Do not fail merely because the application leaves Seek or loads on another domain. Continue the application on the new page just like any other page. ' +
-            'Only use type on elements where editable=true, select on selectable=true, check on checkable=true, upload_resume on uploadable=true, and click/double_click/hover/focus/scroll_into_view on elements that are relevant visible targets. ' +
-            'Every click, double_click, hover, focus, clear, select, check, upload_resume, and scroll_into_view action must include a valid numeric targetId from the current page snapshot. ' +
+            'Only use type on elements where editable=true, select on selectable=true, check on checkable=true, upload_resume/upload_cover_letter on uploadable=true, and click/double_click/hover/focus/scroll_into_view on elements that are relevant visible targets. ' +
+            'Every click, double_click, hover, focus, clear, select, check, upload_resume, upload_cover_letter, and scroll_into_view action must include a valid numeric targetId from the current page snapshot. ' +
             'Type actions normally include targetId, but if a field is hard to target directly, security-sensitive, or only reachable by keyboard navigation, you may use press with Tab or Shift+Tab until the desired field is focused and then use type without targetId to type into the currently focused field. ' +
             'For every type action, you must include the exact literal string to enter in the "text" field. Never omit it. ' +
             'Return exactly one JSON object and nothing else. Do not include markdown, code fences, commentary, or multiple JSON objects. ' +
@@ -2294,8 +2464,8 @@ const planNextAction = async (
             'If attemptFeedback is provided, correct that exact failure and choose a different valid action when repeating the same action would be ineffective. ' +
             'Use page.validationMessages, element.invalid, element.value, and element.selectedOption to correct blocked or prefilled fields before giving up. ' +
             'Treat current input values, selected options, checked states, resume uploads, and cover-letter drafts as editable drafts that must be verified and corrected when inaccurate, generic, or mismatched. ' +
-            'If a resume or CV upload field is visible and the application expects one, use upload_resume to attach the most relevant available uploaded resume. Prefer switching resumes before answering detailed experience, profile, or motivation questions when that keeps the answers consistent with the uploaded resume. ' +
-            'If a cover-letter or motivation field is visible, write a concise tailored answer grounded in the resume and job description. Keep it warm, natural, and human in first person. Avoid AI-sounding phrasing, cliches, stiff corporate language, em dashes, and hidden formatting characters. ' +
+            'If a resume or CV upload field is visible and the application expects one, use upload_resume to attach the most relevant available uploaded resume. Prefer switching resumes before answering detailed experience or profile questions when that keeps the answers consistent with the uploaded resume. ' +
+            'Never type a cover letter or motivation answer directly into the website. The cover letter has already been written into coverLetterDocument. If a cover-letter upload field is visible, use upload_cover_letter. If the page only offers a required typed cover-letter/motivation field and no upload field, use done with finalStatus=review_required. ' +
             'Use done only when the application is submitted or the page clearly shows a confirmation or only non-essential follow-up remains. ' +
             'Use finalStatus=review_required only for captcha, MFA, legal declarations not supported by the resume, or truly missing personal information that is not already supplied by applicationProfile and cannot be conservatively inferred. ' +
             'If blocked or impossible, use fail with a concise message.'
@@ -2315,6 +2485,11 @@ const planNextAction = async (
               candidateProfile,
               resumeLibrary,
               applicationChecklist: checklistContext,
+              coverLetterDocument: {
+                fileName: checklistContext.state.coverLetterDocumentFileName,
+                content: coverLetterDocument.content,
+                sourceResumeFileName: coverLetterDocument.sourceResumeFileName
+              },
               resumeSummary: compactText(activeResumeOption.resume.content, MAX_RESUME_CHARS),
               page: snapshot,
               recentLogs: logs.slice(-8),
@@ -2323,7 +2498,7 @@ const planNextAction = async (
               outputSchema: {
                 reasoning: 'string',
                 action:
-                  'click | double_click | hover | focus | clear | type | select | check | upload_resume | press | scroll | scroll_into_view | wait | wait_for_text | go_back | reload | done | fail',
+                  'click | double_click | hover | focus | clear | type | select | check | upload_resume | upload_cover_letter | press | scroll | scroll_into_view | wait | wait_for_text | go_back | reload | done | fail',
                 targetId: 'number when targeting an element; optional for type when typing into the currently focused field after keyboard navigation',
                 resumeRef:
                   'optional string for upload_resume actions when choosing a specific resume from activeResume or resumeLibrary; omit it to keep using the current activeResume',
@@ -2426,6 +2601,24 @@ const resolveUploadTargetId = (
       const scoreDifference = rankUploadTarget(right) - rankUploadTarget(left);
       return scoreDifference !== 0 ? scoreDifference : left.id - right.id;
     })[0]?.id;
+};
+
+const resolveCoverLetterUploadTargetId = (
+  snapshot: PageSnapshot,
+  decision: AgentDecision
+): number | undefined => {
+  const requestedTarget = getSnapshotElement(snapshot, decision.targetId);
+  if (requestedTarget && isCoverLetterUploadElement(requestedTarget)) {
+    return requestedTarget.id;
+  }
+
+  const coverLetterUploadElements = getCoverLetterUploadElements(snapshot);
+  if (coverLetterUploadElements.length > 0) {
+    return coverLetterUploadElements[0].id;
+  }
+
+  const uploadableElements = snapshot.elements.filter(element => element.uploadable && !element.disabled);
+  return uploadableElements.find(element => !isResumeUploadElement(element))?.id;
 };
 
 const clearEditableTarget = async (page: Page, targetId: number, snapshot: PageSnapshot): Promise<void> => {
@@ -2811,6 +3004,32 @@ const verifyActionOutcome = (
             message: `Checked the resume upload${uploadedResumeLabel}. Review the screenshot if the page still needs confirmation.`
           };
     }
+    case 'upload_cover_letter': {
+      const beforeInvalid = Boolean(beforeElement?.invalid);
+      const afterInvalid = Boolean(afterElement?.invalid);
+      const uploadedCoverLetterLabel = executedAction.coverLetterFileName
+        ? ` "${executedAction.coverLetterFileName}"`
+        : '';
+      const expectedFileName = normalizeComparable(executedAction.coverLetterFileName || '');
+      const afterValue = normalizeComparable(afterElement?.value || '');
+      const pageText = normalizeComparable(afterSnapshot.visibleText);
+      const fileNameIsVisible =
+        Boolean(expectedFileName) && (afterValue.includes(expectedFileName) || pageText.includes(expectedFileName));
+      return fileNameIsVisible
+        ? {
+            success: true,
+            message: `Verified the uploaded cover-letter document${uploadedCoverLetterLabel} is visible or stored in the upload field.`
+          }
+        : !afterInvalid || (beforeInvalid && !afterInvalid)
+        ? {
+            success: true,
+            message: `Checked the cover-letter document upload${uploadedCoverLetterLabel}; the field no longer appears invalid.`
+          }
+        : {
+            success: true,
+            message: `Checked the cover-letter document upload${uploadedCoverLetterLabel}. Review the screenshot if the page still needs confirmation.`
+          };
+    }
     case 'wait_for_text': {
       const query = normalizeComparable(executedAction.textQuery || executedAction.text || '');
       const visibleText = normalizeComparable(afterSnapshot.visibleText);
@@ -2860,7 +3079,8 @@ const executeDecision = async (
   availableResumeOptionsByRef: Map<string, ResumeOption>,
   applicationProfile: ApplicationProfile | undefined,
   snapshot: PageSnapshot,
-  job: Job
+  job: Job,
+  coverLetterDocument: CoverLetterDocumentSnapshot
 ): Promise<DecisionExecutionResult> => {
   switch (decision.action) {
     case 'click': {
@@ -2914,6 +3134,11 @@ const executeDecision = async (
     }
     case 'type': {
       const fieldKind = inferFieldKind(decision, snapshot);
+      if (isCoverLetterFieldKind(fieldKind)) {
+        throw new Error(
+          'Cover-letter and motivation text must not be typed directly into websites. Use upload_cover_letter, or request user review when no cover-letter upload field is available.'
+        );
+      }
       const text = resolveAutofillText(
         decision,
         snapshot,
@@ -3033,6 +3258,36 @@ const executeDecision = async (
         nextActiveResume: selectedResumeOption
       };
     }
+    case 'upload_cover_letter': {
+      let resolvedTargetId = resolveCoverLetterUploadTargetId(snapshot, decision);
+      if (!resolvedTargetId) {
+        throw new Error(
+          'LLM upload_cover_letter action could not resolve a cover-letter upload target from the current page snapshot.'
+        );
+      }
+      let locator;
+      try {
+        locator = await prepareTargetLocator(page, resolvedTargetId, { requireVisible: false });
+      } catch {
+        const refreshedSnapshot = await capturePageSnapshot(page);
+        resolvedTargetId = resolveCoverLetterUploadTargetId(refreshedSnapshot, decision);
+        if (!resolvedTargetId) {
+          throw new Error('No uploadable cover-letter input is currently available on the page.');
+        }
+        locator = await prepareTargetLocator(page, resolvedTargetId, { requireVisible: false });
+      }
+      await locator.setInputFiles(coverLetterDocument.filePath, { timeout: 10000 });
+      await settlePage(page);
+      return {
+        executedAction: {
+          action: 'upload_cover_letter',
+          targetId: resolvedTargetId,
+          coverLetterFileName: coverLetterDocument.fileName
+        },
+        page,
+        uploadedCoverLetterDocument: coverLetterDocument
+      };
+    }
     case 'press': {
       const resolved = await completeInteractivePageAction(page, async () => {
         if (decision.targetId) {
@@ -3117,13 +3372,21 @@ export const applyToJob = async (
     availableResumeOptions.map(option => [option.resumeRef.toLowerCase(), option] as const)
   );
   let activeResumeOption = availableResumeOptions[0];
+  let activeCoverLetterDocument = await createCoverLetterDocument(
+    job,
+    activeResumeOption,
+    applicationProfile,
+    runArtifactsDir
+  );
   const applicationChecklist = createApplicationChecklistRuntime(activeResumeOption);
   await closeSeekLoginSessionIfOpen();
   const session = await launchBrowserSession();
   const logs: string[] = [];
   const artifacts: ApplicationArtifact[] = [];
   let lastSnapshot: PageSnapshot | null = null;
-  let lastCoverLetterText: string | undefined;
+  let lastCoverLetterText: string | undefined = activeCoverLetterDocument.content;
+  let lastCoverLetterDocument: CoverLetterDocumentSnapshot | undefined = activeCoverLetterDocument;
+  let coverLetterDocumentUploaded = false;
   let humanContinuationInstruction: string | undefined;
 
   try {
@@ -3140,6 +3403,7 @@ export const applyToJob = async (
     logs.push(
       `Checklist: verify active resume "${activeResumeOption.resume.fileName}", upload it when a resume/CV field is visible, then check the upload before finishing.`
     );
+    logs.push(`Created cover-letter document: ${activeCoverLetterDocument.fileName}`);
     logs.push(`Opening job page: ${job.url}`);
     await currentPage.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await settlePage(currentPage);
@@ -3162,7 +3426,8 @@ export const applyToJob = async (
           artifacts,
           applicationSnapshot: buildApplicationSnapshotFromOption(job, activeResumeOption, {
             coverLetterText: lastCoverLetterText,
-            coverLetterUsed: Boolean(lastCoverLetterText)
+            coverLetterUsed: coverLetterDocumentUploaded,
+            coverLetterDocument: lastCoverLetterDocument
           })
         };
       }
@@ -3179,7 +3444,8 @@ export const applyToJob = async (
           const checklistContext = buildApplicationChecklistContext(
             activeResumeOption,
             applicationChecklist,
-            workingSnapshot
+            workingSnapshot,
+            activeCoverLetterDocument
           );
           const combinedExtraInstruction = [humanContinuationInstruction, stepExtraInstruction]
             .filter(Boolean)
@@ -3191,6 +3457,7 @@ export const applyToJob = async (
             applicationProfile,
             workingSnapshot,
             checklistContext,
+            activeCoverLetterDocument,
             logs,
             combinedExtraInstruction || undefined,
             attemptFeedback
@@ -3208,6 +3475,7 @@ export const applyToJob = async (
               applicationProfile,
               workingSnapshot,
               checklistContext,
+              activeCoverLetterDocument,
               logs,
               [humanContinuationInstruction, stepExtraInstruction].filter(Boolean).join(' ') || undefined,
               attemptFeedback
@@ -3226,6 +3494,7 @@ export const applyToJob = async (
               applicationProfile,
               workingSnapshot,
               checklistContext,
+              activeCoverLetterDocument,
               logs,
               [humanContinuationInstruction, stepExtraInstruction].filter(Boolean).join(' ') || undefined,
               attemptFeedback
@@ -3282,7 +3551,8 @@ export const applyToJob = async (
                   artifacts,
                   applicationSnapshot: buildApplicationSnapshotFromOption(job, activeResumeOption, {
                     coverLetterText: lastCoverLetterText,
-                    coverLetterUsed: Boolean(lastCoverLetterText)
+                    coverLetterUsed: coverLetterDocumentUploaded,
+                    coverLetterDocument: lastCoverLetterDocument
                   })
                 };
               }
@@ -3296,7 +3566,8 @@ export const applyToJob = async (
                 artifacts,
                 applicationSnapshot: buildApplicationSnapshotFromOption(job, activeResumeOption, {
                   coverLetterText: lastCoverLetterText,
-                  coverLetterUsed: Boolean(lastCoverLetterText)
+                  coverLetterUsed: coverLetterDocumentUploaded,
+                  coverLetterDocument: lastCoverLetterDocument
                 })
               };
             }
@@ -3310,7 +3581,8 @@ export const applyToJob = async (
               artifacts,
               applicationSnapshot: buildApplicationSnapshotFromOption(job, activeResumeOption, {
                 coverLetterText: lastCoverLetterText,
-                coverLetterUsed: Boolean(lastCoverLetterText)
+                coverLetterUsed: coverLetterDocumentUploaded,
+                coverLetterDocument: lastCoverLetterDocument
               })
             };
           }
@@ -3328,7 +3600,8 @@ export const applyToJob = async (
               artifacts,
               applicationSnapshot: buildApplicationSnapshotFromOption(job, activeResumeOption, {
                 coverLetterText: lastCoverLetterText,
-                coverLetterUsed: Boolean(lastCoverLetterText)
+                coverLetterUsed: coverLetterDocumentUploaded,
+                coverLetterDocument: lastCoverLetterDocument
               })
             };
           }
@@ -3340,19 +3613,38 @@ export const applyToJob = async (
             availableResumeOptionsByRef,
             applicationProfile,
             workingSnapshot,
-            job
+            job,
+            activeCoverLetterDocument
           );
           if (execution.nextActiveResume) {
             const previousResumeRef = activeResumeOption.resumeRef;
             activeResumeOption = execution.nextActiveResume;
             syncChecklistActiveResume(applicationChecklist, activeResumeOption);
+            activeCoverLetterDocument = await createCoverLetterDocument(
+              job,
+              activeResumeOption,
+              applicationProfile,
+              runArtifactsDir
+            );
+            lastCoverLetterText = activeCoverLetterDocument.content;
+            lastCoverLetterDocument = activeCoverLetterDocument;
+            coverLetterDocumentUploaded = false;
+            applicationChecklist.coverLetterDocumentUploaded = false;
+            applicationChecklist.coverLetterDocumentChecked = false;
+            applicationChecklist.uploadedCoverLetterFileName = undefined;
             logs.push(
               `${attemptLabel} resume - using ${activeResumeOption.resumeRef} (${activeResumeOption.resume.fileName})` +
                 `${activeResumeOption.resumeRef !== previousResumeRef ? ' as the active resume.' : '.'}`
             );
+            logs.push(`${attemptLabel} cover letter - regenerated ${activeCoverLetterDocument.fileName}.`);
           }
           if (execution.capturedCoverLetterText) {
             lastCoverLetterText = execution.capturedCoverLetterText;
+          }
+          if (execution.uploadedCoverLetterDocument) {
+            lastCoverLetterText = execution.uploadedCoverLetterDocument.content;
+            lastCoverLetterDocument = execution.uploadedCoverLetterDocument;
+            coverLetterDocumentUploaded = true;
           }
           currentPage = execution.page;
           session.page = currentPage;
@@ -3375,6 +3667,15 @@ export const applyToJob = async (
             applicationChecklist.resumeUploadChecked = verification.success;
             logs.push(
               `${attemptLabel} checklist - resume upload checked for "${applicationChecklist.uploadedResumeFileName}".`
+            );
+          }
+          if (execution.executedAction.action === 'upload_cover_letter') {
+            applicationChecklist.coverLetterDocumentUploaded = true;
+            applicationChecklist.uploadedCoverLetterFileName =
+              execution.executedAction.coverLetterFileName || activeCoverLetterDocument.fileName;
+            applicationChecklist.coverLetterDocumentChecked = verification.success;
+            logs.push(
+              `${attemptLabel} checklist - cover-letter document upload checked for "${applicationChecklist.uploadedCoverLetterFileName}".`
             );
           }
           artifacts.push(
@@ -3469,7 +3770,8 @@ export const applyToJob = async (
       artifacts,
       applicationSnapshot: buildApplicationSnapshotFromOption(job, activeResumeOption, {
         coverLetterText: lastCoverLetterText,
-        coverLetterUsed: Boolean(lastCoverLetterText)
+        coverLetterUsed: coverLetterDocumentUploaded,
+        coverLetterDocument: lastCoverLetterDocument
       })
     };
   } catch (error) {
@@ -3498,7 +3800,8 @@ export const applyToJob = async (
       artifacts,
       applicationSnapshot: buildApplicationSnapshotFromOption(job, activeResumeOption, {
         coverLetterText: lastCoverLetterText,
-        coverLetterUsed: Boolean(lastCoverLetterText)
+        coverLetterUsed: coverLetterDocumentUploaded,
+        coverLetterDocument: lastCoverLetterDocument
       })
     };
   } finally {
