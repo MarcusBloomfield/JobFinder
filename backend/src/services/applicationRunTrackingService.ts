@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { detectPlatform } from './applicationPlatformService';
+import { ApplicationPlatform, detectPlatform } from './applicationPlatformService';
 
 type SqliteStatement = {
   run: (...params: unknown[]) => { changes: number; lastInsertRowid: number | bigint };
@@ -201,7 +201,7 @@ export const initializeApplicationRunTracking = (): void => {
   getDatabase();
 };
 
-export const inferApplicationPlatform = (url?: string | null): string => {
+export const inferApplicationPlatform = (url?: string | null): ApplicationPlatform => {
   return detectPlatform(url);
 };
 

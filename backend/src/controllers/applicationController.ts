@@ -23,6 +23,7 @@ import {
   markApplicationRunSkipped,
   markApplicationRunSubmitted
 } from '../services/applicationRunTrackingService';
+import { getApplicationAdapterForPlatform } from '../services/applicationAdapters/adapterRegistry';
 
 const validateJob = (job: any): job is Job => {
   return (
@@ -169,15 +170,19 @@ export const applyToJob = async (req: Request, res: Response) => {
       triggerSource || 'manual'
     );
     trackedApplicationId = trackedApplication.id;
+    const platform = inferApplicationPlatform(job.url);
+    const applicationAdapter = getApplicationAdapterForPlatform(platform);
     const applicationRun = createApplicationRun({
       applicationId: trackedApplication.id,
-      platform: inferApplicationPlatform(job.url),
+      platform,
       currentUrl: job.url,
       metadata: {
         triggerSource: triggerSource || 'manual',
         jobId: job.id,
         jobTitle: job.title,
-        company: job.company
+        company: job.company,
+        adapter: applicationAdapter.id,
+        adapterName: applicationAdapter.displayName
       }
     });
     applicationRunId = applicationRun.id;

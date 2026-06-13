@@ -20,6 +20,7 @@
 - Application run records are exposed through `/api/application-runs`, including diagnostics, current URL/status/platform, screenshot/snapshot links, and the latest linked human intervention status.
 - The Progress page now includes an application run status summary and `ApplicationRunViewer` in the details modal for current/past browser attempts, screenshots, failures, and intervention state.
 - Application platform detection lives in `backend/src/services/applicationPlatformService.ts`. It detects seek, indeed, greenhouse, lever, workday, smartrecruiters, bamboohr, ashby, pageup, successfactors, taleo, and falls back to `generic`.
+- Application adapter contracts live in `backend/src/services/applicationAdapters/types.ts`. The registry in `applicationAdapters/adapterRegistry.ts` currently registers `seek` and `generic`; unsupported known ATS platforms route to `generic` until dedicated adapters are added.
 
 ---
 
