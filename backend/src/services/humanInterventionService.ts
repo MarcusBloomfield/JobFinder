@@ -246,6 +246,23 @@ export const listPendingHumanInterventions = (): HumanInterventionRecord[] => {
   return rows.map(mapHumanInterventionRow);
 };
 
+export const listHumanInterventionsForApplication = (
+  applicationId: string
+): HumanInterventionRecord[] => {
+  const rows = getDatabase()
+    .prepare(
+      `
+        SELECT *
+        FROM human_interventions
+        WHERE application_id = ?
+        ORDER BY created_at DESC
+      `
+    )
+    .all<HumanInterventionRow>(applicationId);
+
+  return rows.map(mapHumanInterventionRow);
+};
+
 export const getHumanInterventionById = (
   interventionId: string
 ): HumanInterventionRecord | null => {

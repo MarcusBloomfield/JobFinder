@@ -17,6 +17,7 @@
 - OpenAI-backed LLM features default to `gpt-5.4`; environment variables such as `APPLY_AGENT_MODEL`, `COVER_LETTER_MODEL`, and `PROFILE_FILL_MODEL` can still override specific flows.
 - Auto-apply handles SEEK's stable first job page and choose-documents page with deterministic Playwright logic before asking the LLM. The document page uploads the selected resume and generated cover-letter DOCX through Playwright file payloads, so cover-letter upload target detection no longer depends on screenshots or native file picker dialogs.
 - Auto-apply now writes a separate `application_runs` SQLite row for each browser attempt, linked to the existing `job_applications` row. Runs track platform, status, current step/URL, latest error, screenshot path, and snapshot path.
+- Application run records are exposed through `/api/application-runs`, including diagnostics, current URL/status/platform, screenshot/snapshot links, and the latest linked human intervention status.
 
 ---
 
@@ -184,6 +185,7 @@ JobFinder/
 > **Human intervention** is wired through SQLite-backed `/api/interventions/*` routes and the Progress page panel. When the apply agent reaches a review-required stop, it creates a pending intervention, keeps the browser session open, and resumes/skips/fails based on the user action.
 
 > **Application runs** are persisted by `backend/src/services/applicationRunTrackingService.ts` in the shared SQLite database. Statuses are `running`, `waiting_for_user`, `ready_for_review`, `submitted`, `skipped`, and `failed`; this keeps attempt diagnostics separate from final `job_applications` records.
+> `backend/src/controllers/applicationRunController.ts` and `backend/src/routes/applicationRunRoutes.ts` expose run listing/detail/cancel APIs for frontend polling and debug views.
 
 > **Profile Fill with AI** is available on the Profile page. It sends stored parsed resumes plus the current browser-saved profile to `POST /api/apply/profile/fill`, where `applicationProfileFillService.ts` asks OpenAI to extract only resume-supported fields and preserve existing profile values unless the resume explicitly replaces them.
 
@@ -204,6 +206,9 @@ JobFinder/
 | POST | `/api/openai/evaluate-job-match` | Single job match evaluation |
 | POST | `/api/openai/evaluate-job-matches-bulk` | Bulk scoring (batched, retried, with fallback) |
 | POST | `/api/apply/profile/fill` | Fill the saved application profile from stored parsed resumes using AI |
+| GET | `/api/application-runs` | List application run attempts, optionally filtered by `applicationId` or `status` |
+| GET | `/api/application-runs/:id` | Get one application run with diagnostics, artifacts, and latest intervention status |
+| POST | `/api/application-runs/:id/cancel` | Cancel an active run by marking it skipped |
 | POST | `/api/applications/:applicationId/enrich` | Refresh missing tracked application metadata from the original listing |
 | PATCH | `/api/applications/:applicationId/job-details` | Save persisted employer/application details for a tracked job |
 | GET | `/api/interventions/pending` | List pending auto-apply handoffs for the Progress page |

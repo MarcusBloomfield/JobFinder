@@ -419,6 +419,47 @@ export const getApplicationRunById = (runId: string): ApplicationRunRecord | nul
   return row ? mapApplicationRunRow(row) : null;
 };
 
+export interface ListApplicationRunsOptions {
+  applicationId?: string;
+  status?: ApplicationRunStatus;
+  limit?: number;
+}
+
+export const listApplicationRuns = (
+  options: ListApplicationRunsOptions = {}
+): ApplicationRunRecord[] => {
+  const filters: string[] = [];
+  const params: unknown[] = [];
+
+  if (options.applicationId) {
+    filters.push('application_id = ?');
+    params.push(options.applicationId);
+  }
+
+  if (options.status && RUN_STATUSES.includes(options.status)) {
+    filters.push('status = ?');
+    params.push(options.status);
+  }
+
+  const limit = Math.max(1, Math.min(200, Math.floor(options.limit || 50)));
+  params.push(limit);
+
+  const whereSql = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
+  const rows = getDatabase()
+    .prepare(
+      `
+        SELECT *
+        FROM application_runs
+        ${whereSql}
+        ORDER BY created_at DESC
+        LIMIT ?
+      `
+    )
+    .all<ApplicationRunRow>(...params);
+
+  return rows.map(mapApplicationRunRow);
+};
+
 export const listApplicationRunsForApplication = (
   applicationId: string
 ): ApplicationRunRecord[] => {
