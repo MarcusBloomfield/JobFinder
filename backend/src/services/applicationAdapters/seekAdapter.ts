@@ -2504,7 +2504,9 @@ const buildApplicationChecklistContext = (
 
   if (visibleCoverLetterTextTargets.length > 0) {
     outstanding.push(
-      'Do not type cover-letter or motivation text into website text fields. Use a cover-letter document upload field, or request user review if the website only accepts typed cover-letter text.'
+      visibleCoverLetterUploadTargets.length > 0
+        ? 'Prefer uploading the generated cover-letter document; if the upload fails, type the cover-letter document text into the visible cover-letter field.'
+        : 'Type the generated cover-letter document text into the visible cover-letter or motivation field.'
     );
   }
 
@@ -2514,7 +2516,7 @@ const buildApplicationChecklistContext = (
       'Upload the active resume when a resume/CV field is visible, required, invalid, or expected by the application.',
       'After upload, check the page state, visible file name when available, and validation messages to ensure the correct resume was accepted.',
       'Fill required contact, profile, work-rights, and screening fields from the resume/applicationProfile.',
-      'Never type a cover letter directly into the website. Cover letters must be written to the generated DOCX and uploaded.',
+      'Prefer uploading the generated cover-letter DOCX, but type the same cover-letter text directly when no upload field is available or the upload fails.',
       'Correct inaccurate prefilled answers, weak drafts, and visible validation errors.',
       'Use done only after submission is confirmed, or after all essential checklist items are complete and only non-essential follow-up remains.'
     ],
@@ -2560,14 +2562,6 @@ const getChecklistDoneBlocker = (
     !checklistContext.state.coverLetterDocumentUploaded
   ) {
     return `Checklist incomplete: a cover-letter upload field is visible, but "${checklistContext.state.coverLetterDocumentFileName}" has not been uploaded yet.`;
-  }
-
-  if (
-    checklistContext.state.visibleCoverLetterTextTargets.length > 0 &&
-    checklistContext.state.visibleCoverLetterUploadTargets.length === 0 &&
-    decision.finalStatus !== 'review_required'
-  ) {
-    return 'Checklist incomplete: the page only shows a typed cover-letter/motivation field. Do not type it; request user review instead.';
   }
 
   if (checklistContext.outstanding.some(item => item.toLowerCase().includes('validation'))) {
@@ -2648,7 +2642,7 @@ const planNextAction = async (
             'Use page.validationMessages, element.invalid, element.value, and element.selectedOption to correct blocked or prefilled fields before giving up. ' +
             'Treat current input values, selected options, checked states, resume uploads, and cover-letter drafts as editable drafts that must be verified and corrected when inaccurate, generic, or mismatched. ' +
             'If a resume or CV upload field is visible and the application expects one, use upload_resume to attach the most relevant available uploaded resume. Prefer switching resumes before answering detailed experience or profile questions when that keeps the answers consistent with the uploaded resume. ' +
-            'Never type a cover letter or motivation answer directly into the website. The cover letter has already been written into coverLetterDocument. If a cover-letter upload field is visible, use upload_cover_letter. If the page only offers a required typed cover-letter/motivation field and no upload field, use done with finalStatus=review_required. ' +
+            'The cover letter has already been written into coverLetterDocument. Prefer upload_cover_letter when the current page snapshot contains a cover-letter upload target. If upload_cover_letter is unavailable or fails, type coverLetterDocument.content directly into the visible cover-letter or motivation field. ' +
             (requireFinalReview
               ? 'APPLY_AGENT_REQUIRE_FINAL_REVIEW is enabled. Do not click a final submit/send-application control. When the application is complete and ready for final submission, use done with finalStatus=review_required so the user can review and submit or continue. '
               : '') +
@@ -3053,9 +3047,12 @@ const inferUploadTriggerKind = (
   element: PageElementSnapshot | undefined,
   decision: AgentDecision
 ): UploadDocumentKind | null => {
-  const hints = `${getElementHints(element)} ${decision.message || ''} ${decision.reasoning || ''}`;
+  const targetHints = getElementHints(element);
+  const decisionHints = `${decision.message || ''} ${decision.reasoning || ''}`;
+  const hints = `${targetHints} ${decision.action === 'upload_resume' || decision.action === 'upload_cover_letter' ? decisionHints : ''}`;
   const looksLikeUploadTrigger =
-    Boolean(element?.uploadable) || /upload|attach|choose|select|replace|document|file/.test(hints);
+    Boolean(element?.uploadable) ||
+    /upload|attach|choose|select|replace|document|file/.test(targetHints);
 
   if (!looksLikeUploadTrigger) {
     return null;
@@ -3891,7 +3888,18 @@ const verifyActionOutcome = (
         : { success: false, message: `Expected text "${executedAction.textQuery || executedAction.text}" is not visible yet.` };
     }
     case 'click':
-    case 'double_click':
+    case 'double_click': {
+      const changed =
+        beforeSnapshot.url !== afterSnapshot.url ||
+        beforeSnapshot.activeElementId !== afterSnapshot.activeElementId ||
+        normalizeComparable(beforeSnapshot.visibleText) !== normalizeComparable(afterSnapshot.visibleText);
+      return changed
+        ? { success: true, message: `Verified page state changed after ${executedAction.action}.` }
+        : {
+            success: false,
+            message: `No major visible change detected after ${executedAction.action}; retry with a different target or action.`
+          };
+    }
     case 'go_back':
     case 'reload': {
       const changed =
@@ -4007,11 +4015,6 @@ const executeDecision = async (
     }
     case 'type': {
       const fieldKind = inferFieldKind(decision, snapshot);
-      if (isCoverLetterFieldKind(fieldKind)) {
-        throw new Error(
-          'Cover-letter and motivation text must not be typed directly into websites. Use upload_cover_letter, or request user review when no cover-letter upload field is available.'
-        );
-      }
       const text = resolveAutofillText(
         decision,
         snapshot,
@@ -4019,9 +4022,13 @@ const executeDecision = async (
         job,
         applicationProfile
       );
+      const coverLetterFallbackText =
+        isCoverLetterFieldKind(fieldKind) && !(typeof decision.text === 'string' && decision.text.trim())
+          ? coverLetterDocument.content
+          : undefined;
       const typedText =
-        text !== undefined && isCoverLetterFieldKind(fieldKind)
-          ? normalizeCoverLetterText(text)
+        (coverLetterFallbackText || text) !== undefined && isCoverLetterFieldKind(fieldKind)
+          ? normalizeCoverLetterText(coverLetterFallbackText || text || '')
           : text;
       const resolvedTargetId = resolveFallbackTypeTargetId(decision, snapshot);
       if (typedText === undefined) {
@@ -4091,6 +4098,15 @@ const executeDecision = async (
       } else {
         await locator.uncheck({ timeout: 10000 });
       }
+      try {
+        const currentChecked = await locator.isChecked({ timeout: 1000 });
+        const element = getSnapshotElement(snapshot, decision.targetId);
+        if (currentChecked !== decision.checked && element?.type === 'checkbox') {
+          await locator.click({ timeout: 5000, force: true });
+        }
+      } catch {
+        // Some custom controls do not expose isChecked; snapshot verification handles them.
+      }
       await page.waitForTimeout(250);
       return {
         executedAction: { action: 'check', targetId: decision.targetId, checked: decision.checked },
@@ -4149,7 +4165,27 @@ const executeDecision = async (
         }
         locator = await prepareTargetLocator(page, resolvedTargetId, { requireVisible: false });
       }
-      await locator.setInputFiles(buildCoverLetterUploadPayload(coverLetterDocument), { timeout: 10000 });
+      try {
+        await locator.setInputFiles(buildCoverLetterUploadPayload(coverLetterDocument), { timeout: 10000 });
+      } catch (uploadError) {
+        const fallbackSnapshot = await capturePageSnapshot(page).catch(() => snapshot);
+        const typedCoverLetterTarget = getCoverLetterTextElements(fallbackSnapshot)[0];
+        if (!typedCoverLetterTarget) {
+          throw uploadError;
+        }
+        const typedText = normalizeCoverLetterText(coverLetterDocument.content);
+        await typeIntoTarget(page, typedCoverLetterTarget.id, typedText, fallbackSnapshot);
+        await settlePage(page);
+        return {
+          executedAction: {
+            action: 'type',
+            targetId: typedCoverLetterTarget.id,
+            text: typedText
+          },
+          page,
+          capturedCoverLetterText: typedText
+        };
+      }
       await settlePage(page);
       return {
         executedAction: {
@@ -4581,6 +4617,35 @@ export const applyToJob = async (
             }
           }
 
+          if (
+            decision.action === 'upload_cover_letter' &&
+            !resolveCoverLetterUploadTargetId(workingSnapshot, decision)
+          ) {
+            const typedCoverLetterTarget = getCoverLetterTextElements(workingSnapshot)[0];
+            if (typedCoverLetterTarget) {
+              const fallbackMessage =
+                'Cover-letter upload is unavailable, so typing the prepared cover letter into the visible cover-letter field.';
+              logs.push(`${attemptLabel}: cover-letter upload unavailable - ${fallbackMessage}`);
+              decision = {
+                reasoning: fallbackMessage,
+                action: 'type',
+                targetId: typedCoverLetterTarget.id,
+                text: activeCoverLetterDocument.content,
+                message: fallbackMessage
+              };
+            } else {
+              const reviewMessage =
+                'The agent requested a cover-letter upload, but no cover-letter upload or text field is available on this page.';
+              logs.push(`${attemptLabel}: cover-letter upload unavailable - ${reviewMessage}`);
+              decision = {
+                reasoning: reviewMessage,
+                action: 'done',
+                finalStatus: 'review_required',
+                message: reviewMessage
+              };
+            }
+          }
+
           logs.push(
             `${attemptLabel}: ${decision.action} - ${decision.message || decision.reasoning.slice(0, 180)}`
           );
@@ -4796,6 +4861,10 @@ export const applyToJob = async (
           }
           if (execution.capturedCoverLetterText) {
             lastCoverLetterText = execution.capturedCoverLetterText;
+            coverLetterDocumentUploaded = true;
+            applicationChecklist.coverLetterDocumentUploaded = true;
+            applicationChecklist.coverLetterDocumentChecked = true;
+            applicationChecklist.uploadedCoverLetterFileName = 'typed directly';
           }
           if (execution.uploadedCoverLetterDocument) {
             lastCoverLetterText = execution.uploadedCoverLetterDocument.content;
