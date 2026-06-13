@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { Request, Response } from 'express';
 import {
+  HumanInterventionRecord,
   HumanInterventionResolutionAction,
   getHumanInterventionById,
   getHumanInterventionScreenshot,
@@ -10,6 +11,49 @@ import {
 } from '../services/humanInterventionService';
 
 const RESOLUTION_ACTIONS: HumanInterventionResolutionAction[] = ['continued', 'skipped', 'failed'];
+
+interface HumanInterventionArtifact {
+  kind: string;
+  step: number;
+  label: string;
+  filePath?: string;
+  url?: string;
+  createdAt?: string;
+}
+
+interface HumanInterventionApiRecord extends HumanInterventionRecord {
+  artifacts: HumanInterventionArtifact[];
+}
+
+const getInterventionArtifacts = (
+  metadata: Record<string, unknown> | undefined
+): HumanInterventionArtifact[] => {
+  const value = metadata?.artifactUrls;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(item => item && typeof item === 'object')
+    .map(item => {
+      const artifact = item as Record<string, unknown>;
+      return {
+        kind: typeof artifact.kind === 'string' ? artifact.kind : 'artifact',
+        step: typeof artifact.step === 'number' ? artifact.step : 0,
+        label: typeof artifact.label === 'string' ? artifact.label : 'Artifact',
+        filePath: typeof artifact.filePath === 'string' ? artifact.filePath : undefined,
+        url: typeof artifact.url === 'string' ? artifact.url : undefined,
+        createdAt: typeof artifact.createdAt === 'string' ? artifact.createdAt : undefined
+      };
+    });
+};
+
+const toHumanInterventionApiRecord = (
+  intervention: HumanInterventionRecord
+): HumanInterventionApiRecord => ({
+  ...intervention,
+  artifacts: getInterventionArtifacts(intervention.metadata)
+});
 
 const getInterventionId = (req: Request): string | undefined => {
   const { id } = req.params as { id?: string };
@@ -75,7 +119,7 @@ const resolvePendingIntervention = (
 
   return res.status(200).json({
     error: false,
-    data
+    data: toHumanInterventionApiRecord(data)
   });
 };
 
@@ -83,7 +127,7 @@ export const getPendingInterventions = (_req: Request, res: Response) => {
   try {
     res.status(200).json({
       error: false,
-      data: listPendingHumanInterventions()
+      data: listPendingHumanInterventions().map(toHumanInterventionApiRecord)
     });
   } catch (error) {
     console.error('Error in getPendingInterventions controller:', error);
@@ -111,7 +155,7 @@ export const getIntervention = (req: Request, res: Response) => {
 
     return res.status(200).json({
       error: false,
-      data
+      data: toHumanInterventionApiRecord(data)
     });
   } catch (error) {
     console.error('Error in getIntervention controller:', error);

@@ -25,11 +25,21 @@ export interface ApplicationRunDiagnostics {
   errorMessage?: string;
   errorStack?: string;
   metadata?: Record<string, unknown>;
+  artifacts?: ApplicationRunArtifact[];
 }
 
 export interface ApplicationRunAsset {
   filePath?: string;
   url?: string;
+}
+
+export interface ApplicationRunArtifact {
+  kind: string;
+  step: number;
+  label: string;
+  filePath?: string;
+  url?: string;
+  createdAt?: string;
 }
 
 export interface ApplicationRunRecord {
@@ -47,6 +57,7 @@ export interface ApplicationRunRecord {
   snapshotUrl?: string;
   metadata?: Record<string, unknown>;
   diagnostics: ApplicationRunDiagnostics;
+  artifacts?: ApplicationRunArtifact[];
   screenshots: ApplicationRunAsset;
   snapshot: ApplicationRunAsset;
   intervention?: ApplicationRunIntervention;

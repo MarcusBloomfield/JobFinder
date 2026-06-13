@@ -65,3 +65,6 @@ export const getApplicationRunSnapshotUrl = (
   run: ApplicationRunRecord
 ): string | undefined =>
   normalizeAssetUrl(run.snapshot?.url || run.snapshotUrl);
+
+export const getApplicationRunArtifactUrl = (url?: string): string | undefined =>
+  normalizeAssetUrl(url);

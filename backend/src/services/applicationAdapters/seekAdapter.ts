@@ -15,6 +15,7 @@ import {
 } from '../humanInterventionService';
 import {
   ApplicationRunUpdateInput,
+  getApplicationRunById,
   markApplicationRunFailed,
   markApplicationRunReadyForReview,
   markApplicationRunSkipped,
@@ -43,8 +44,9 @@ const APPLY_AGENT_TIMEOUT_MS = Number(process.env.APPLY_AGENT_TIMEOUT_MS || 5500
 const ALLOW_EXTERNAL_WEBSITE_AUTOMATION =
   process.env.APPLY_AGENT_ALLOW_EXTERNAL_WEBSITES?.trim().toLowerCase() === 'true';
 const UPLOADS_DIR = path.resolve(__dirname, '../../../uploads');
-const PLAYWRIGHT_PROFILE_DIR = path.resolve(__dirname, '../../../.playwright/seek-profile');
-const APPLICATION_RUNS_DIR = path.resolve(__dirname, '../../../.playwright/application-runs');
+const PLAYWRIGHT_DIR = path.resolve(__dirname, '../../../.playwright');
+const PLAYWRIGHT_PROFILE_DIR = path.join(PLAYWRIGHT_DIR, 'seek-profile');
+const APPLICATION_RUNS_DIR = path.join(PLAYWRIGHT_DIR, 'application-runs');
 const ARTIFACTS_BASE_URL =
   process.env.APPLICATION_ARTIFACTS_BASE_URL?.trim() ||
   `http://localhost:${process.env.PORT || 5000}/artifacts`;
@@ -214,6 +216,15 @@ interface PageSnapshot {
   activeElementSummary?: string;
   canGoBack: boolean;
   elements: PageElementSnapshot[];
+}
+
+interface RunArtifactFile {
+  kind: 'screenshot' | 'html' | 'visible_text' | 'page_snapshot' | 'diagnostics';
+  step: number;
+  label: string;
+  filePath: string;
+  url: string;
+  createdAt: string;
 }
 
 type BrowserActionType =
@@ -847,15 +858,17 @@ const slugify = (value: string): string =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 60) || 'application-run';
 
-const createRunArtifactsDir = (job: Job): string => {
+const createRunArtifactsDir = (job: Job, applicationRunId?: string): string => {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const directory = path.join(APPLICATION_RUNS_DIR, `${timestamp}-${slugify(job.company)}-${slugify(job.title)}`);
+  const directory = applicationRunId
+    ? path.join(APPLICATION_RUNS_DIR, applicationRunId)
+    : path.join(APPLICATION_RUNS_DIR, `${timestamp}-${slugify(job.company)}-${slugify(job.title)}`);
   fs.mkdirSync(directory, { recursive: true });
   return directory;
 };
 
 const toArtifactUrl = (absolutePath: string): string => {
-  const relativePath = path.relative(path.resolve(__dirname, '../../.playwright'), absolutePath);
+  const relativePath = path.relative(PLAYWRIGHT_DIR, absolutePath);
   return `${ARTIFACTS_BASE_URL}/${relativePath.replace(/\\/g, '/')}`;
 };
 
@@ -3322,6 +3335,44 @@ const captureRunScreenshot = async (
   };
 };
 
+const toRunArtifactFile = (
+  kind: RunArtifactFile['kind'],
+  step: number,
+  label: string,
+  filePath: string
+): RunArtifactFile => ({
+  kind,
+  step,
+  label,
+  filePath,
+  url: toArtifactUrl(filePath),
+  createdAt: new Date().toISOString()
+});
+
+const writeRunArtifact = (
+  runArtifactsDir: string,
+  step: number,
+  label: string,
+  extension: string,
+  content: string
+): RunArtifactFile => {
+  const normalizedExtension = extension.replace(/^\./, '');
+  const fileName = `${String(step).padStart(2, '0')}-${slugify(label)}.${normalizedExtension}`;
+  const filePath = path.join(runArtifactsDir, fileName);
+  fs.writeFileSync(filePath, content, 'utf8');
+
+  const kind: RunArtifactFile['kind'] =
+    normalizedExtension === 'html'
+      ? 'html'
+      : label.includes('visible-text')
+        ? 'visible_text'
+        : label.includes('diagnostics')
+          ? 'diagnostics'
+          : 'page_snapshot';
+
+  return toRunArtifactFile(kind, step, label, filePath);
+};
+
 const saveRunSnapshot = (
   snapshot: PageSnapshot,
   runArtifactsDir: string,
@@ -3338,6 +3389,40 @@ const saveRunSnapshot = (
   };
 };
 
+const getRunArtifactFiles = (
+  metadata: Record<string, unknown> | undefined
+): RunArtifactFile[] => {
+  const value = metadata?.artifactUrls;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(item => item && typeof item === 'object') as RunArtifactFile[];
+};
+
+const mergeRunMetadata = (
+  applicationRunId: string | undefined,
+  metadata: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined => {
+  if (!metadata) {
+    return undefined;
+  }
+
+  if (!applicationRunId) {
+    return metadata;
+  }
+
+  const existing = getApplicationRunById(applicationRunId)?.metadata || {};
+  return {
+    ...existing,
+    ...metadata,
+    artifactUrls: [
+      ...getRunArtifactFiles(existing),
+      ...getRunArtifactFiles(metadata)
+    ]
+  };
+};
+
 const updateRunProgress = (
   applicationRunId: string | undefined,
   updates: ApplicationRunUpdateInput
@@ -3347,13 +3432,152 @@ const updateRunProgress = (
   }
 
   try {
-    updateApplicationRun(applicationRunId, updates);
+    updateApplicationRun(applicationRunId, {
+      ...updates,
+      metadata: mergeRunMetadata(applicationRunId, updates.metadata)
+    });
   } catch (error) {
     console.warn(
       'Failed to update application run:',
       error instanceof Error ? error.message : error
     );
   }
+};
+
+const getDetectedFields = (snapshot: PageSnapshot) =>
+  snapshot.elements
+    .filter(element =>
+      Boolean(
+        element.editable ||
+          element.selectable ||
+          element.checkable ||
+          element.uploadable ||
+          element.required ||
+          element.invalid
+      )
+    )
+    .map(element => ({
+      id: element.id,
+      tag: element.tag,
+      type: element.type,
+      label: compactText(element.label || element.text || element.name || '', 180),
+      name: element.name,
+      placeholder: element.placeholder,
+      value: element.value,
+      selectedOption: element.selectedOption,
+      options: element.options,
+      required: element.required,
+      invalid: element.invalid,
+      uploadable: element.uploadable,
+      editable: element.editable,
+      selectable: element.selectable,
+      checkable: element.checkable
+    }));
+
+const saveRunDiagnostics = async (options: {
+  applicationRunId?: string;
+  page: Page;
+  runArtifactsDir: string;
+  step: number;
+  label: string;
+  platform: string;
+  adapterId: string;
+  adapterName: string;
+  snapshot?: PageSnapshot | null;
+  decision?: AgentDecision;
+  error?: unknown;
+  screenshot?: ApplicationArtifact;
+}): Promise<{
+  screenshot?: ApplicationArtifact;
+  snapshot: PageSnapshot;
+  snapshotArtifact: { filePath: string; url: string };
+  artifacts: RunArtifactFile[];
+}> => {
+  const snapshot = options.snapshot || await capturePageSnapshot(options.page);
+  const screenshot = options.screenshot || await captureRunScreenshot(
+    options.page,
+    options.runArtifactsDir,
+    options.step,
+    `${options.label}-screenshot`
+  );
+  const snapshotArtifact = saveRunSnapshot(
+    snapshot,
+    options.runArtifactsDir,
+    options.step,
+    `${options.label}-page-snapshot`
+  );
+  const htmlArtifact = writeRunArtifact(
+    options.runArtifactsDir,
+    options.step,
+    `${options.label}-html`,
+    'html',
+    await options.page.content().catch(() => '<!-- HTML snapshot unavailable -->')
+  );
+  const visibleTextArtifact = writeRunArtifact(
+    options.runArtifactsDir,
+    options.step,
+    `${options.label}-visible-text`,
+    'txt',
+    snapshot.visibleText
+  );
+  const error = options.error;
+  const diagnosticsArtifact = writeRunArtifact(
+    options.runArtifactsDir,
+    options.step,
+    `${options.label}-diagnostics`,
+    'json',
+    JSON.stringify(
+      {
+        capturedAt: new Date().toISOString(),
+        currentUrl: snapshot.url,
+        platform: options.platform,
+        adapter: options.adapterId,
+        adapterName: options.adapterName,
+        step: options.step,
+        title: snapshot.title,
+        visibleTextFile: visibleTextArtifact.url,
+        htmlFile: htmlArtifact.url,
+        screenshotFile: screenshot.url,
+        pageSnapshotFile: snapshotArtifact.url,
+        detectedFields: getDetectedFields(snapshot),
+        aiMappingResult: options.decision || null,
+        errorMessage: error instanceof Error ? error.message : undefined,
+        errorStack: error instanceof Error ? error.stack : undefined
+      },
+      null,
+      2
+    )
+  );
+  const artifacts = [
+    toRunArtifactFile('screenshot', options.step, screenshot.label, screenshot.filePath),
+    toRunArtifactFile('page_snapshot', options.step, `${options.label}-page-snapshot`, snapshotArtifact.filePath),
+    htmlArtifact,
+    visibleTextArtifact,
+    diagnosticsArtifact
+  ];
+
+  updateRunProgress(options.applicationRunId, {
+    currentStep: options.step,
+    currentUrl: snapshot.url,
+    errorMessage: error instanceof Error ? error.message : undefined,
+    errorStack: error instanceof Error ? error.stack : undefined,
+    screenshotFilePath: screenshot.filePath,
+    screenshotUrl: screenshot.url,
+    snapshotFilePath: snapshotArtifact.filePath,
+    snapshotUrl: snapshotArtifact.url,
+    metadata: {
+      lastDiagnosticsUrl: diagnosticsArtifact.url,
+      lastDiagnosticsFilePath: diagnosticsArtifact.filePath,
+      artifactUrls: artifacts
+    }
+  });
+
+  return {
+    screenshot,
+    snapshot,
+    snapshotArtifact,
+    artifacts
+  };
 };
 
 const markRunFailed = (
@@ -3451,6 +3675,7 @@ const waitForReviewRequiredResolution = async (options: {
   message: string;
   screenshot?: ApplicationArtifact;
   snapshot?: { filePath: string; url: string };
+  diagnostics?: RunArtifactFile[];
   step: number;
   logs: string[];
 }): Promise<'continued' | 'skipped' | 'failed' | 'pending'> => {
@@ -3486,7 +3711,8 @@ const waitForReviewRequiredResolution = async (options: {
       jobTitle: options.job.title,
       company: options.job.company,
       jobUrl: options.job.url,
-      step: options.step
+      step: options.step,
+      artifactUrls: options.diagnostics || []
     }
   });
 
@@ -4007,7 +4233,7 @@ export const applyToJob = async (
   applicationRunId?: string,
   requireFinalReview = false
 ): Promise<JobApplicationResult> => {
-  const runArtifactsDir = createRunArtifactsDir(job);
+  const runArtifactsDir = createRunArtifactsDir(job, applicationRunId);
   updateRunProgress(applicationRunId, {
     status: 'running',
     currentStep: 0,
@@ -4107,14 +4333,27 @@ export const applyToJob = async (
           `step-${step}-final-review-required`
         );
         artifacts.push(reviewArtifact);
+        const reviewDiagnostics = await saveRunDiagnostics({
+          applicationRunId,
+          page: currentPage,
+          runArtifactsDir,
+          step,
+          label: `step-${step}-final-review-required`,
+          platform: 'seek',
+          adapterId: 'seek',
+          adapterName: 'Seek adapter',
+          snapshot: lastSnapshot,
+          screenshot: reviewArtifact
+        });
         const resolution = await waitForReviewRequiredResolution({
           applicationId,
           applicationRunId,
           job,
           pageUrl: lastSnapshot.url,
           message: reviewMessage,
-          screenshot: reviewArtifact,
-          snapshot: stepSnapshotArtifact,
+          screenshot: reviewDiagnostics.screenshot,
+          snapshot: reviewDiagnostics.snapshotArtifact,
+          diagnostics: reviewDiagnostics.artifacts,
           step,
           logs
         });
@@ -4272,6 +4511,7 @@ export const applyToJob = async (
 
       for (let attempt = 1; attempt <= MAX_STEP_RECOVERY_ATTEMPTS; attempt += 1) {
         const attemptLabel = attempt === 1 ? `Step ${step}` : `Step ${step} attempt ${attempt}`;
+        let decision: AgentDecision | undefined;
 
         try {
           const checklistContext = buildApplicationChecklistContext(
@@ -4283,7 +4523,7 @@ export const applyToJob = async (
           const combinedExtraInstruction = [humanContinuationInstruction, stepExtraInstruction]
             .filter(Boolean)
             .join(' ');
-          let decision = await planNextAction(
+          decision = await planNextAction(
             job,
             activeResumeOption,
             availableResumeOptions,
@@ -4362,14 +4602,28 @@ export const applyToJob = async (
 
             if ((decision.finalStatus || 'review_required') === 'review_required') {
               const reviewMessage = decision.message || 'Application flow requires user review.';
+              const reviewDiagnostics = await saveRunDiagnostics({
+                applicationRunId,
+                page: currentPage,
+                runArtifactsDir,
+                step,
+                label: `step-${step}-attempt-${attempt}-review-required`,
+                platform: 'seek',
+                adapterId: 'seek',
+                adapterName: 'Seek adapter',
+                snapshot: workingSnapshot,
+                decision,
+                screenshot: doneArtifact
+              });
               const resolution = await waitForReviewRequiredResolution({
                 applicationId,
                 applicationRunId,
                 job,
                 pageUrl: workingSnapshot.url,
                 message: reviewMessage,
-                screenshot: doneArtifact,
-                snapshot: doneSnapshotArtifact,
+                screenshot: reviewDiagnostics.screenshot,
+                snapshot: reviewDiagnostics.snapshotArtifact,
+                diagnostics: reviewDiagnostics.artifacts,
                 step,
                 logs
               });
@@ -4470,14 +4724,28 @@ export const applyToJob = async (
               step,
               `step-${step}-attempt-${attempt}-fail`
             );
+            const failDiagnostics = await saveRunDiagnostics({
+              applicationRunId,
+              page: currentPage,
+              runArtifactsDir,
+              step,
+              label: `step-${step}-attempt-${attempt}-fail`,
+              platform: 'seek',
+              adapterId: 'seek',
+              adapterName: 'Seek adapter',
+              snapshot: workingSnapshot,
+              decision,
+              screenshot: failArtifact,
+              error: new Error(decision.message || 'Application agent could not continue.')
+            });
             markRunFailed(applicationRunId, {
               currentStep: step,
               currentUrl: workingSnapshot.url,
               errorMessage: decision.message || 'Application agent could not continue.',
               screenshotFilePath: failArtifact.filePath,
               screenshotUrl: failArtifact.url,
-              snapshotFilePath: failSnapshotArtifact.filePath,
-              snapshotUrl: failSnapshotArtifact.url
+              snapshotFilePath: failDiagnostics.snapshotArtifact.filePath || failSnapshotArtifact.filePath,
+              snapshotUrl: failDiagnostics.snapshotArtifact.url || failSnapshotArtifact.url
             });
             return {
               status: 'failed',
@@ -4613,6 +4881,7 @@ export const applyToJob = async (
         } catch (error) {
           const blockedExternalWebsite = isExternalWebsiteBlockedError(error);
           const message = error instanceof Error ? error.message : 'Unknown step error';
+          let capturedErrorArtifact: ApplicationArtifact | undefined;
           try {
             const errorArtifact = await captureRunScreenshot(
               currentPage,
@@ -4622,6 +4891,7 @@ export const applyToJob = async (
                 ? `step-${step}-attempt-${attempt}-skipped-external`
                 : `step-${step}-attempt-${attempt}-error`
             );
+            capturedErrorArtifact = errorArtifact;
             artifacts.push(errorArtifact);
             updateRunProgress(applicationRunId, {
               status: blockedExternalWebsite ? 'skipped' : 'running',
@@ -4638,13 +4908,37 @@ export const applyToJob = async (
 
           if (blockedExternalWebsite) {
             logs.push(`${attemptLabel} skipped - ${message}`);
+            let diagnosticSnapshotArtifact: { filePath: string; url: string } | undefined;
+            let diagnosticScreenshot: ApplicationArtifact | undefined;
+            try {
+              const diagnostics = await saveRunDiagnostics({
+                applicationRunId,
+                page: currentPage,
+                runArtifactsDir,
+                step,
+                label: `step-${step}-attempt-${attempt}-skipped-external`,
+                platform: 'seek',
+                adapterId: 'seek',
+                adapterName: 'Seek adapter',
+                snapshot: workingSnapshot,
+                decision,
+                error,
+                screenshot: capturedErrorArtifact
+              });
+              diagnosticSnapshotArtifact = diagnostics.snapshotArtifact;
+              diagnosticScreenshot = diagnostics.screenshot;
+            } catch {
+              // Preserve the external-site skip if diagnostic capture also fails.
+            }
             markRunSkipped(applicationRunId, {
               currentStep: step,
               currentUrl: currentPage.url(),
               errorMessage: message,
               errorStack: error instanceof Error ? error.stack : undefined,
-              screenshotFilePath: artifacts[artifacts.length - 1]?.filePath,
-              screenshotUrl: artifacts[artifacts.length - 1]?.url
+              screenshotFilePath: diagnosticScreenshot?.filePath || artifacts[artifacts.length - 1]?.filePath,
+              screenshotUrl: diagnosticScreenshot?.url || artifacts[artifacts.length - 1]?.url,
+              snapshotFilePath: diagnosticSnapshotArtifact?.filePath,
+              snapshotUrl: diagnosticSnapshotArtifact?.url
             });
             throw error;
           }
@@ -4659,13 +4953,37 @@ export const applyToJob = async (
           }
 
           if (attempt >= MAX_STEP_RECOVERY_ATTEMPTS) {
+            let diagnosticSnapshotArtifact: { filePath: string; url: string } | undefined;
+            let diagnosticScreenshot: ApplicationArtifact | undefined;
+            try {
+              const diagnostics = await saveRunDiagnostics({
+                applicationRunId,
+                page: currentPage,
+                runArtifactsDir,
+                step,
+                label: `step-${step}-attempt-${attempt}-failed`,
+                platform: 'seek',
+                adapterId: 'seek',
+                adapterName: 'Seek adapter',
+                snapshot: workingSnapshot,
+                decision,
+                error,
+                screenshot: capturedErrorArtifact
+              });
+              diagnosticSnapshotArtifact = diagnostics.snapshotArtifact;
+              diagnosticScreenshot = diagnostics.screenshot;
+            } catch {
+              // Preserve the original step failure if diagnostic capture also fails.
+            }
             markRunFailed(applicationRunId, {
               currentStep: step,
               currentUrl: lastSnapshot?.url || currentPage.url(),
               errorMessage: `Step ${step} failed after ${MAX_STEP_RECOVERY_ATTEMPTS} attempts. ${message}`,
               errorStack: error instanceof Error ? error.stack : undefined,
-              screenshotFilePath: artifacts[artifacts.length - 1]?.filePath,
-              screenshotUrl: artifacts[artifacts.length - 1]?.url
+              screenshotFilePath: diagnosticScreenshot?.filePath || artifacts[artifacts.length - 1]?.filePath,
+              screenshotUrl: diagnosticScreenshot?.url || artifacts[artifacts.length - 1]?.url,
+              snapshotFilePath: diagnosticSnapshotArtifact?.filePath,
+              snapshotUrl: diagnosticSnapshotArtifact?.url
             });
             throw new Error(
               `Step ${step} failed after ${MAX_STEP_RECOVERY_ATTEMPTS} attempts. ${message}`
@@ -4688,11 +5006,37 @@ export const applyToJob = async (
     }
 
     if (applicationRunId) {
+      let diagnosticSnapshotArtifact: { filePath: string; url: string } | undefined;
+      let diagnosticScreenshot: ApplicationArtifact | undefined;
+      try {
+        const diagnostics = await saveRunDiagnostics({
+          applicationRunId,
+          page: session.page,
+          runArtifactsDir,
+          step: MAX_AGENT_STEPS,
+          label: 'max-steps-ready-for-review',
+          platform: 'seek',
+          adapterId: 'seek',
+          adapterName: 'Seek adapter',
+          snapshot: lastSnapshot,
+          error: new Error(
+            `Reached the maximum of ${MAX_AGENT_STEPS} browser steps before confirming submission.`
+          )
+        });
+        diagnosticSnapshotArtifact = diagnostics.snapshotArtifact;
+        diagnosticScreenshot = diagnostics.screenshot;
+      } catch {
+        // Keep the ready-for-review status update even if diagnostic capture fails.
+      }
       try {
         markApplicationRunReadyForReview(applicationRunId, {
           currentStep: MAX_AGENT_STEPS,
           currentUrl: lastSnapshot?.url || job.url,
-          errorMessage: `Reached the maximum of ${MAX_AGENT_STEPS} browser steps before confirming submission.`
+          errorMessage: `Reached the maximum of ${MAX_AGENT_STEPS} browser steps before confirming submission.`,
+          screenshotFilePath: diagnosticScreenshot?.filePath,
+          screenshotUrl: diagnosticScreenshot?.url,
+          snapshotFilePath: diagnosticSnapshotArtifact?.filePath,
+          snapshotUrl: diagnosticSnapshotArtifact?.url
         });
       } catch (error) {
         console.warn(
@@ -4731,13 +5075,36 @@ export const applyToJob = async (
       // Ignore screenshot failures while reporting the original apply error.
     }
     logs.push(`${blockedExternalWebsite ? 'Skipped' : 'Failed'}: ${message}`);
+    let finalDiagnosticSnapshotArtifact: { filePath: string; url: string } | undefined;
+    let finalDiagnosticScreenshot: ApplicationArtifact | undefined;
+    try {
+      const diagnostics = await saveRunDiagnostics({
+        applicationRunId,
+        page: session.page,
+        runArtifactsDir,
+        step: logs.length,
+        label: blockedExternalWebsite ? 'skipped-external-website' : 'failure-state',
+        platform: 'seek',
+        adapterId: 'seek',
+        adapterName: 'Seek adapter',
+        snapshot: lastSnapshot,
+        error,
+        screenshot: failureArtifact
+      });
+      finalDiagnosticSnapshotArtifact = diagnostics.snapshotArtifact;
+      finalDiagnosticScreenshot = diagnostics.screenshot;
+    } catch {
+      // Ignore diagnostic capture failures while reporting the original apply error.
+    }
     const finalRunUpdate = {
       currentStep: logs.length,
       currentUrl: blockedUrl || lastSnapshot?.url || job.url,
       errorMessage: message,
       errorStack: error instanceof Error ? error.stack : undefined,
-      screenshotFilePath: failureArtifact?.filePath,
-      screenshotUrl: failureArtifact?.url
+      screenshotFilePath: finalDiagnosticScreenshot?.filePath || failureArtifact?.filePath,
+      screenshotUrl: finalDiagnosticScreenshot?.url || failureArtifact?.url,
+      snapshotFilePath: finalDiagnosticSnapshotArtifact?.filePath,
+      snapshotUrl: finalDiagnosticSnapshotArtifact?.url
     };
     if (blockedExternalWebsite) {
       markRunSkipped(applicationRunId, finalRunUpdate);

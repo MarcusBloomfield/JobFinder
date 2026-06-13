@@ -6,6 +6,7 @@ import {
 import {
   cancelApplicationRun,
   fetchApplicationRuns,
+  getApplicationRunArtifactUrl,
   getApplicationRunScreenshotUrl,
   getApplicationRunSnapshotUrl
 } from '../services/applicationRunService';
@@ -82,6 +83,8 @@ const getRunFailureReason = (run: ApplicationRunRecord): string | undefined =>
 
 const getRunStatusClass = (status: ApplicationRunStatus): string =>
   status.replace(/_/g, '-');
+
+const getArtifactLabel = (kind: string): string => formatMetadataLabel(kind);
 
 const isRunActive = (run: ApplicationRunRecord): boolean =>
   !run.completedAt && !TERMINAL_RUN_STATUSES.includes(run.status);
@@ -313,6 +316,19 @@ const ApplicationRunViewer: React.FC<ApplicationRunViewerProps> = ({
                     Open Page Snapshot
                   </a>
                 )}
+                {(selectedRun.artifacts || selectedRun.diagnostics?.artifacts || [])
+                  .filter(artifact => artifact.url)
+                  .slice(-8)
+                  .map(artifact => (
+                    <a
+                      key={`${artifact.kind}-${artifact.step}-${artifact.label}`}
+                      href={getApplicationRunArtifactUrl(artifact.url)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {getArtifactLabel(artifact.kind)}
+                    </a>
+                  ))}
                 {isRunActive(selectedRun) && (
                   <button
                     className="application-run-cancel-button"

@@ -21,10 +21,12 @@ const RUN_STATUSES: ApplicationRunStatus[] = [
 ];
 
 interface ApplicationRunApiRecord extends ApplicationRunRecord {
+  artifacts: ApplicationRunArtifact[];
   diagnostics: {
     errorMessage?: string;
     errorStack?: string;
     metadata?: Record<string, unknown>;
+    artifacts: ApplicationRunArtifact[];
   };
   screenshots: {
     filePath?: string;
@@ -38,6 +40,15 @@ interface ApplicationRunApiRecord extends ApplicationRunRecord {
     HumanInterventionRecord,
     'id' | 'status' | 'reason' | 'title' | 'message' | 'pageUrl' | 'screenshotUrl' | 'createdAt' | 'updatedAt' | 'resolvedAt'
   >;
+}
+
+interface ApplicationRunArtifact {
+  kind: string;
+  step: number;
+  label: string;
+  filePath?: string;
+  url?: string;
+  createdAt?: string;
 }
 
 const parseLimit = (value: unknown): number => {
@@ -55,15 +66,39 @@ const getRunId = (req: Request): string | undefined => normalizeText(req.params.
 const getLatestIntervention = (applicationId: string): HumanInterventionRecord | undefined =>
   listHumanInterventionsForApplication(applicationId)[0];
 
+const getRunArtifacts = (metadata: Record<string, unknown> | undefined): ApplicationRunArtifact[] => {
+  const value = metadata?.artifactUrls;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(item => item && typeof item === 'object')
+    .map(item => {
+      const artifact = item as Record<string, unknown>;
+      return {
+        kind: typeof artifact.kind === 'string' ? artifact.kind : 'artifact',
+        step: typeof artifact.step === 'number' ? artifact.step : 0,
+        label: typeof artifact.label === 'string' ? artifact.label : 'Artifact',
+        filePath: typeof artifact.filePath === 'string' ? artifact.filePath : undefined,
+        url: typeof artifact.url === 'string' ? artifact.url : undefined,
+        createdAt: typeof artifact.createdAt === 'string' ? artifact.createdAt : undefined
+      };
+    });
+};
+
 const toApplicationRunApiRecord = (run: ApplicationRunRecord): ApplicationRunApiRecord => {
   const intervention = getLatestIntervention(run.applicationId);
+  const artifacts = getRunArtifacts(run.metadata);
 
   return {
     ...run,
+    artifacts,
     diagnostics: {
       errorMessage: run.errorMessage,
       errorStack: run.errorStack,
-      metadata: run.metadata
+      metadata: run.metadata,
+      artifacts
     },
     screenshots: {
       filePath: run.screenshotFilePath,

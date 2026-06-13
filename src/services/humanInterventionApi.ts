@@ -24,12 +24,22 @@ export interface HumanInterventionRecord {
   pageUrl?: string;
   screenshotFilePath?: string;
   screenshotUrl?: string;
+  artifacts?: HumanInterventionArtifact[];
   metadata?: Record<string, unknown>;
   status: HumanInterventionStatus;
   resolutionMessage?: string;
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string;
+}
+
+export interface HumanInterventionArtifact {
+  kind: string;
+  step: number;
+  label: string;
+  filePath?: string;
+  url?: string;
+  createdAt?: string;
 }
 
 const getResponseData = <Data>(responseData: unknown): Data => {
