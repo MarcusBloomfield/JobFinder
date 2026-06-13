@@ -16,6 +16,13 @@ import {
   failTrackedApplication,
   finalizeTrackedApplication
 } from '../services/applicationTrackingService';
+import {
+  createApplicationRun,
+  inferApplicationPlatform,
+  markApplicationRunFailed,
+  markApplicationRunSkipped,
+  markApplicationRunSubmitted
+} from '../services/applicationRunTrackingService';
 
 const validateJob = (job: any): job is Job => {
   return (
@@ -95,6 +102,7 @@ const validateApplicationProfile = (profile: any): profile is ApplicationProfile
 
 export const applyToJob = async (req: Request, res: Response) => {
   let trackedApplicationId: string | null = null;
+  let applicationRunId: string | null = null;
 
   try {
     const { job, resume, applicationProfile, triggerSource } = req.body;
@@ -161,20 +169,58 @@ export const applyToJob = async (req: Request, res: Response) => {
       triggerSource || 'manual'
     );
     trackedApplicationId = trackedApplication.id;
+    const applicationRun = createApplicationRun({
+      applicationId: trackedApplication.id,
+      platform: inferApplicationPlatform(job.url),
+      currentUrl: job.url,
+      metadata: {
+        triggerSource: triggerSource || 'manual',
+        jobId: job.id,
+        jobTitle: job.title,
+        company: job.company
+      }
+    });
+    applicationRunId = applicationRun.id;
     const result = await applicationAgentService.applyToJob(
       job,
       resume,
       applicationProfile,
-      trackedApplication.id
+      trackedApplication.id,
+      applicationRun.id
     );
     finalizeTrackedApplication(trackedApplication.id, result);
+    if (result.status === 'applied') {
+      markApplicationRunSubmitted(applicationRun.id, {
+        currentStep: result.steps,
+        currentUrl: result.finalUrl,
+        screenshotFilePath: result.artifacts[result.artifacts.length - 1]?.filePath,
+        screenshotUrl: result.artifacts[result.artifacts.length - 1]?.url
+      });
+    } else if (result.status === 'skipped') {
+      markApplicationRunSkipped(applicationRun.id, {
+        currentStep: result.steps,
+        currentUrl: result.finalUrl,
+        errorMessage: result.message,
+        screenshotFilePath: result.artifacts[result.artifacts.length - 1]?.filePath,
+        screenshotUrl: result.artifacts[result.artifacts.length - 1]?.url
+      });
+    } else if (result.status === 'failed') {
+      markApplicationRunFailed(applicationRun.id, {
+        currentStep: result.steps,
+        currentUrl: result.finalUrl,
+        errorMessage: result.message,
+        screenshotFilePath: result.artifacts[result.artifacts.length - 1]?.filePath,
+        screenshotUrl: result.artifacts[result.artifacts.length - 1]?.url
+      });
+    }
 
     res.status(200).json({
       error: false,
       message: result.message,
       data: {
         ...result,
-        trackingId: trackedApplication.id
+        trackingId: trackedApplication.id,
+        runId: applicationRun.id
       }
     });
   } catch (error) {
@@ -185,6 +231,12 @@ export const applyToJob = async (req: Request, res: Response) => {
         trackedApplicationId,
         error instanceof Error ? error.message : 'An unknown error occurred'
       );
+    }
+    if (applicationRunId) {
+      markApplicationRunFailed(applicationRunId, {
+        errorMessage: error instanceof Error ? error.message : 'An unknown error occurred',
+        errorStack: error instanceof Error ? error.stack : undefined
+      });
     }
 
     res.status(500).json({

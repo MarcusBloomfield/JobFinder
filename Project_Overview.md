@@ -16,6 +16,7 @@
 - Auto-apply now has an optional distance limit in the Profile page. The user sets a home address/current location plus max kilometres; manual and bulk auto-apply skip jobs outside that range or jobs whose location cannot be resolved.
 - OpenAI-backed LLM features default to `gpt-5.4`; environment variables such as `APPLY_AGENT_MODEL`, `COVER_LETTER_MODEL`, and `PROFILE_FILL_MODEL` can still override specific flows.
 - Auto-apply handles SEEK's stable first job page and choose-documents page with deterministic Playwright logic before asking the LLM. The document page uploads the selected resume and generated cover-letter DOCX through Playwright file payloads, so cover-letter upload target detection no longer depends on screenshots or native file picker dialogs.
+- Auto-apply now writes a separate `application_runs` SQLite row for each browser attempt, linked to the existing `job_applications` row. Runs track platform, status, current step/URL, latest error, screenshot path, and snapshot path.
 
 ---
 
@@ -182,6 +183,8 @@ JobFinder/
 
 > **Human intervention** is wired through SQLite-backed `/api/interventions/*` routes and the Progress page panel. When the apply agent reaches a review-required stop, it creates a pending intervention, keeps the browser session open, and resumes/skips/fails based on the user action.
 
+> **Application runs** are persisted by `backend/src/services/applicationRunTrackingService.ts` in the shared SQLite database. Statuses are `running`, `waiting_for_user`, `ready_for_review`, `submitted`, `skipped`, and `failed`; this keeps attempt diagnostics separate from final `job_applications` records.
+
 > **Profile Fill with AI** is available on the Profile page. It sends stored parsed resumes plus the current browser-saved profile to `POST /api/apply/profile/fill`, where `applicationProfileFillService.ts` asks OpenAI to extract only resume-supported fields and preserve existing profile values unless the resume explicitly replaces them.
 
 > **Note:** Models are duplicated across `src/models/` and `backend/src/models/`. Keep them in sync when changing the shape.
@@ -259,6 +262,7 @@ JobFinder/
 - SEEK job detail apply clicks and the SEEK choose-documents upload step are handled before LLM planning. Snapshot capture also prioritizes upload controls and richer labels so hidden file inputs are included when the LLM still needs structured page context.
 - The apply controller does not scrape/enrich the listing during an apply run; the visible browser opens the job URL only from the application agent.
 - Review-required stops create human intervention records and wait for Continue Bot, Skip Application, or Mark Failed from the Progress page.
+- Each apply attempt creates an `application_runs` record before launching Playwright. The agent updates the run on each step with the current URL plus latest screenshot/snapshot artifacts, then marks it submitted, waiting_for_user, ready_for_review, skipped, or failed.
 
 ---
 

@@ -13,6 +13,7 @@ import applicationTrackingRoutes from './routes/applicationTrackingRoutes';
 import humanInterventionRoutes from './routes/humanInterventionRoutes';
 import coverLetterExampleRoutes from './routes/coverLetterExampleRoutes';
 import { initializeApplicationTracking } from './services/applicationTrackingService';
+import { initializeApplicationRunTracking } from './services/applicationRunTrackingService';
 import { initializeHumanInterventions } from './services/humanInterventionService';
 
 // Load environment variables
@@ -22,6 +23,7 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 initializeApplicationTracking();
+initializeApplicationRunTracking();
 initializeHumanInterventions();
 
 // Middleware

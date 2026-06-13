@@ -13,6 +13,15 @@ import {
   createHumanIntervention,
   waitForHumanInterventionResolution
 } from './humanInterventionService';
+import {
+  ApplicationRunUpdateInput,
+  markApplicationRunFailed,
+  markApplicationRunReadyForReview,
+  markApplicationRunSkipped,
+  markApplicationRunSubmitted,
+  markApplicationRunWaitingForUser,
+  updateApplicationRun
+} from './applicationRunTrackingService';
 
 const MAX_AGENT_STEPS = Number(process.env.APPLY_AGENT_MAX_STEPS || 25);
 const MAX_STEP_RECOVERY_ATTEMPTS = Number(process.env.APPLY_AGENT_MAX_STEP_RECOVERY_ATTEMPTS || 3);
@@ -3290,6 +3299,94 @@ const captureRunScreenshot = async (
   };
 };
 
+const saveRunSnapshot = (
+  snapshot: PageSnapshot,
+  runArtifactsDir: string,
+  step: number,
+  label: string
+): { filePath: string; url: string } => {
+  const fileName = `${String(step).padStart(2, '0')}-${slugify(label)}.json`;
+  const filePath = path.join(runArtifactsDir, fileName);
+  fs.writeFileSync(filePath, JSON.stringify(snapshot, null, 2));
+
+  return {
+    filePath,
+    url: toArtifactUrl(filePath)
+  };
+};
+
+const updateRunProgress = (
+  applicationRunId: string | undefined,
+  updates: ApplicationRunUpdateInput
+): void => {
+  if (!applicationRunId) {
+    return;
+  }
+
+  try {
+    updateApplicationRun(applicationRunId, updates);
+  } catch (error) {
+    console.warn(
+      'Failed to update application run:',
+      error instanceof Error ? error.message : error
+    );
+  }
+};
+
+const markRunFailed = (
+  applicationRunId: string | undefined,
+  updates: Omit<ApplicationRunUpdateInput, 'status' | 'completed'>
+): void => {
+  if (!applicationRunId) {
+    return;
+  }
+
+  try {
+    markApplicationRunFailed(applicationRunId, updates);
+  } catch (error) {
+    console.warn(
+      'Failed to mark application run failed:',
+      error instanceof Error ? error.message : error
+    );
+  }
+};
+
+const markRunSkipped = (
+  applicationRunId: string | undefined,
+  updates: Omit<ApplicationRunUpdateInput, 'status' | 'completed'>
+): void => {
+  if (!applicationRunId) {
+    return;
+  }
+
+  try {
+    markApplicationRunSkipped(applicationRunId, updates);
+  } catch (error) {
+    console.warn(
+      'Failed to mark application run skipped:',
+      error instanceof Error ? error.message : error
+    );
+  }
+};
+
+const markRunSubmitted = (
+  applicationRunId: string | undefined,
+  updates: Omit<ApplicationRunUpdateInput, 'status' | 'completed'>
+): void => {
+  if (!applicationRunId) {
+    return;
+  }
+
+  try {
+    markApplicationRunSubmitted(applicationRunId, updates);
+  } catch (error) {
+    console.warn(
+      'Failed to mark application run submitted:',
+      error instanceof Error ? error.message : error
+    );
+  }
+};
+
 const inferHumanInterventionReason = (message: string): HumanInterventionReason => {
   const normalized = message.toLowerCase();
 
@@ -3325,13 +3422,34 @@ const inferHumanInterventionReason = (message: string): HumanInterventionReason 
 
 const waitForReviewRequiredResolution = async (options: {
   applicationId?: string;
+  applicationRunId?: string;
   job: Job;
   pageUrl: string;
   message: string;
   screenshot?: ApplicationArtifact;
+  snapshot?: { filePath: string; url: string };
   step: number;
   logs: string[];
 }): Promise<'continued' | 'skipped' | 'failed' | 'pending'> => {
+  if (options.applicationRunId) {
+    try {
+      markApplicationRunWaitingForUser(options.applicationRunId, {
+        currentStep: options.step,
+        currentUrl: options.pageUrl,
+        screenshotFilePath: options.screenshot?.filePath,
+        screenshotUrl: options.screenshot?.url,
+        snapshotFilePath: options.snapshot?.filePath,
+        snapshotUrl: options.snapshot?.url,
+        errorMessage: options.message
+      });
+    } catch (error) {
+      console.warn(
+        'Failed to mark application run waiting for user:',
+        error instanceof Error ? error.message : error
+      );
+    }
+  }
+
   const intervention = createHumanIntervention({
     applicationId: options.applicationId,
     reason: inferHumanInterventionReason(options.message),
@@ -3354,6 +3472,13 @@ const waitForReviewRequiredResolution = async (options: {
   try {
     const resolution = await waitForHumanInterventionResolution(intervention.id);
     options.logs.push(`Human intervention resolved: ${resolution.status}`);
+    if (options.applicationRunId && resolution.status === 'continued') {
+      updateRunProgress(options.applicationRunId, {
+        status: 'running',
+        currentStep: options.step,
+        currentUrl: options.pageUrl
+      });
+    }
     return resolution.status === 'continued' ||
       resolution.status === 'skipped' ||
       resolution.status === 'failed'
@@ -3362,6 +3487,24 @@ const waitForReviewRequiredResolution = async (options: {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Human intervention wait failed.';
     options.logs.push(`Human intervention unresolved: ${message}`);
+    if (options.applicationRunId) {
+      try {
+        markApplicationRunReadyForReview(options.applicationRunId, {
+          currentStep: options.step,
+          currentUrl: options.pageUrl,
+          screenshotFilePath: options.screenshot?.filePath,
+          screenshotUrl: options.screenshot?.url,
+          snapshotFilePath: options.snapshot?.filePath,
+          snapshotUrl: options.snapshot?.url,
+          errorMessage: message
+        });
+      } catch (runError) {
+        console.warn(
+          'Failed to mark application run ready for review:',
+          runError instanceof Error ? runError.message : runError
+        );
+      }
+    }
     return 'pending';
   }
 };
@@ -3837,9 +3980,21 @@ export const applyToJob = async (
   job: Job,
   resume: Resume,
   applicationProfile?: ApplicationProfile,
-  applicationId?: string
+  applicationId?: string,
+  applicationRunId?: string
 ): Promise<JobApplicationResult> => {
   const runArtifactsDir = createRunArtifactsDir(job);
+  updateRunProgress(applicationRunId, {
+    status: 'running',
+    currentStep: 0,
+    currentUrl: job.url,
+    metadata: {
+      artifactsDir: runArtifactsDir,
+      jobId: job.id,
+      jobTitle: job.title,
+      company: job.company
+    }
+  });
   const availableResumeOptionsResult = await buildAvailableResumeOptions(
     job,
     resume,
@@ -3889,15 +4044,42 @@ export const applyToJob = async (
     await currentPage.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await settlePage(currentPage);
     ensureAllowedAutomationUrl(currentPage.url());
-    artifacts.push(await captureRunScreenshot(currentPage, runArtifactsDir, 0, 'initial-page'));
+    const initialScreenshot = await captureRunScreenshot(currentPage, runArtifactsDir, 0, 'initial-page');
+    artifacts.push(initialScreenshot);
+    updateRunProgress(applicationRunId, {
+      status: 'running',
+      currentStep: 0,
+      currentUrl: currentPage.url(),
+      screenshotFilePath: initialScreenshot.filePath,
+      screenshotUrl: initialScreenshot.url
+    });
 
     for (let step = 1; step <= MAX_AGENT_STEPS; step += 1) {
       lastSnapshot = await capturePageSnapshot(currentPage);
       ensureAllowedAutomationUrl(lastSnapshot.url);
+      const stepSnapshotArtifact = saveRunSnapshot(
+        lastSnapshot,
+        runArtifactsDir,
+        step,
+        `step-${step}-snapshot`
+      );
+      updateRunProgress(applicationRunId, {
+        status: 'running',
+        currentStep: step,
+        currentUrl: lastSnapshot.url,
+        snapshotFilePath: stepSnapshotArtifact.filePath,
+        snapshotUrl: stepSnapshotArtifact.url
+      });
 
       const completionMessage = detectCompletion(lastSnapshot);
       if (completionMessage) {
         logs.push(`Step ${step}: ${completionMessage}`);
+        markRunSubmitted(applicationRunId, {
+          currentStep: step,
+          currentUrl: lastSnapshot.url,
+          snapshotFilePath: stepSnapshotArtifact.filePath,
+          snapshotUrl: stepSnapshotArtifact.url
+        });
         return {
           status: 'applied',
           message: completionMessage,
@@ -3947,17 +4129,33 @@ export const applyToJob = async (
           );
         }
 
-        artifacts.push(
-          await captureRunScreenshot(
-            currentPage,
-            runArtifactsDir,
-            step,
-            deterministicSeekResult.clickedApply
-              ? `step-${step}-seek-apply`
-              : `step-${step}-seek-documents`
-          )
+        const deterministicArtifact = await captureRunScreenshot(
+          currentPage,
+          runArtifactsDir,
+          step,
+          deterministicSeekResult.clickedApply
+            ? `step-${step}-seek-apply`
+            : `step-${step}-seek-documents`
         );
+        artifacts.push(deterministicArtifact);
         lastSnapshot = await capturePageSnapshot(currentPage);
+        const deterministicSnapshotArtifact = saveRunSnapshot(
+          lastSnapshot,
+          runArtifactsDir,
+          step,
+          deterministicSeekResult.clickedApply
+            ? `step-${step}-seek-apply-after`
+            : `step-${step}-seek-documents-after`
+        );
+        updateRunProgress(applicationRunId, {
+          status: 'running',
+          currentStep: step,
+          currentUrl: lastSnapshot.url,
+          screenshotFilePath: deterministicArtifact.filePath,
+          screenshotUrl: deterministicArtifact.url,
+          snapshotFilePath: deterministicSnapshotArtifact.filePath,
+          snapshotUrl: deterministicSnapshotArtifact.url
+        });
         continue;
       }
 
@@ -4046,15 +4244,23 @@ export const applyToJob = async (
               `step-${step}-attempt-${attempt}-done`
             );
             artifacts.push(doneArtifact);
+            const doneSnapshotArtifact = saveRunSnapshot(
+              workingSnapshot,
+              runArtifactsDir,
+              step,
+              `step-${step}-attempt-${attempt}-done`
+            );
 
             if ((decision.finalStatus || 'review_required') === 'review_required') {
               const reviewMessage = decision.message || 'Application flow requires user review.';
               const resolution = await waitForReviewRequiredResolution({
                 applicationId,
+                applicationRunId,
                 job,
                 pageUrl: workingSnapshot.url,
                 message: reviewMessage,
                 screenshot: doneArtifact,
+                snapshot: doneSnapshotArtifact,
                 step,
                 logs
               });
@@ -4068,6 +4274,23 @@ export const applyToJob = async (
               }
 
               if (resolution === 'skipped' || resolution === 'failed') {
+                const update = {
+                  currentStep: step,
+                  currentUrl: workingSnapshot.url,
+                  errorMessage:
+                    resolution === 'skipped'
+                      ? 'Application skipped after human intervention.'
+                      : 'Application marked failed after human intervention.',
+                  screenshotFilePath: doneArtifact.filePath,
+                  screenshotUrl: doneArtifact.url,
+                  snapshotFilePath: doneSnapshotArtifact.filePath,
+                  snapshotUrl: doneSnapshotArtifact.url
+                };
+                if (resolution === 'skipped') {
+                  markRunSkipped(applicationRunId, update);
+                } else {
+                  markRunFailed(applicationRunId, update);
+                }
                 return {
                   status: resolution,
                   message:
@@ -4101,6 +4324,14 @@ export const applyToJob = async (
               };
             }
 
+            markRunSubmitted(applicationRunId, {
+              currentStep: step,
+              currentUrl: workingSnapshot.url,
+              screenshotFilePath: doneArtifact.filePath,
+              screenshotUrl: doneArtifact.url,
+              snapshotFilePath: doneSnapshotArtifact.filePath,
+              snapshotUrl: doneSnapshotArtifact.url
+            });
             return {
               status: 'applied',
               message: decision.message || 'Application flow reached a stopping point.',
@@ -4117,9 +4348,28 @@ export const applyToJob = async (
           }
 
           if (decision.action === 'fail') {
-            artifacts.push(
-              await captureRunScreenshot(currentPage, runArtifactsDir, step, `step-${step}-attempt-${attempt}-fail`)
+            const failArtifact = await captureRunScreenshot(
+              currentPage,
+              runArtifactsDir,
+              step,
+              `step-${step}-attempt-${attempt}-fail`
             );
+            artifacts.push(failArtifact);
+            const failSnapshotArtifact = saveRunSnapshot(
+              workingSnapshot,
+              runArtifactsDir,
+              step,
+              `step-${step}-attempt-${attempt}-fail`
+            );
+            markRunFailed(applicationRunId, {
+              currentStep: step,
+              currentUrl: workingSnapshot.url,
+              errorMessage: decision.message || 'Application agent could not continue.',
+              screenshotFilePath: failArtifact.filePath,
+              screenshotUrl: failArtifact.url,
+              snapshotFilePath: failSnapshotArtifact.filePath,
+              snapshotUrl: failSnapshotArtifact.url
+            });
             return {
               status: 'failed',
               message: decision.message || 'Application agent could not continue.',
@@ -4207,16 +4457,30 @@ export const applyToJob = async (
               `${attemptLabel} checklist - cover-letter document upload checked for "${applicationChecklist.uploadedCoverLetterFileName}".`
             );
           }
-          artifacts.push(
-            await captureRunScreenshot(
-              currentPage,
-              runArtifactsDir,
-              step,
-              `step-${step}-attempt-${attempt}-${decision.action}`
-            )
+          const actionArtifact = await captureRunScreenshot(
+            currentPage,
+            runArtifactsDir,
+            step,
+            `step-${step}-attempt-${attempt}-${decision.action}`
           );
+          artifacts.push(actionArtifact);
           workingSnapshot = postActionSnapshot;
           lastSnapshot = postActionSnapshot;
+          const actionSnapshotArtifact = saveRunSnapshot(
+            postActionSnapshot,
+            runArtifactsDir,
+            step,
+            `step-${step}-attempt-${attempt}-${decision.action}-after`
+          );
+          updateRunProgress(applicationRunId, {
+            status: 'running',
+            currentStep: step,
+            currentUrl: postActionSnapshot.url,
+            screenshotFilePath: actionArtifact.filePath,
+            screenshotUrl: actionArtifact.url,
+            snapshotFilePath: actionSnapshotArtifact.filePath,
+            snapshotUrl: actionSnapshotArtifact.url
+          });
 
           if (verification.success) {
             humanContinuationInstruction = undefined;
@@ -4241,22 +4505,38 @@ export const applyToJob = async (
           const blockedExternalWebsite = isExternalWebsiteBlockedError(error);
           const message = error instanceof Error ? error.message : 'Unknown step error';
           try {
-            artifacts.push(
-              await captureRunScreenshot(
-                currentPage,
-                runArtifactsDir,
-                step,
-                blockedExternalWebsite
-                  ? `step-${step}-attempt-${attempt}-skipped-external`
-                  : `step-${step}-attempt-${attempt}-error`
-              )
+            const errorArtifact = await captureRunScreenshot(
+              currentPage,
+              runArtifactsDir,
+              step,
+              blockedExternalWebsite
+                ? `step-${step}-attempt-${attempt}-skipped-external`
+                : `step-${step}-attempt-${attempt}-error`
             );
+            artifacts.push(errorArtifact);
+            updateRunProgress(applicationRunId, {
+              status: blockedExternalWebsite ? 'skipped' : 'running',
+              currentStep: step,
+              currentUrl: currentPage.url(),
+              errorMessage: message,
+              errorStack: error instanceof Error ? error.stack : undefined,
+              screenshotFilePath: errorArtifact.filePath,
+              screenshotUrl: errorArtifact.url
+            });
           } catch {
             // Ignore screenshot failures while recovering from the original step error.
           }
 
           if (blockedExternalWebsite) {
             logs.push(`${attemptLabel} skipped - ${message}`);
+            markRunSkipped(applicationRunId, {
+              currentStep: step,
+              currentUrl: currentPage.url(),
+              errorMessage: message,
+              errorStack: error instanceof Error ? error.stack : undefined,
+              screenshotFilePath: artifacts[artifacts.length - 1]?.filePath,
+              screenshotUrl: artifacts[artifacts.length - 1]?.url
+            });
             throw error;
           }
 
@@ -4270,6 +4550,14 @@ export const applyToJob = async (
           }
 
           if (attempt >= MAX_STEP_RECOVERY_ATTEMPTS) {
+            markRunFailed(applicationRunId, {
+              currentStep: step,
+              currentUrl: lastSnapshot?.url || currentPage.url(),
+              errorMessage: `Step ${step} failed after ${MAX_STEP_RECOVERY_ATTEMPTS} attempts. ${message}`,
+              errorStack: error instanceof Error ? error.stack : undefined,
+              screenshotFilePath: artifacts[artifacts.length - 1]?.filePath,
+              screenshotUrl: artifacts[artifacts.length - 1]?.url
+            });
             throw new Error(
               `Step ${step} failed after ${MAX_STEP_RECOVERY_ATTEMPTS} attempts. ${message}`
             );
@@ -4290,6 +4578,20 @@ export const applyToJob = async (
       }
     }
 
+    if (applicationRunId) {
+      try {
+        markApplicationRunReadyForReview(applicationRunId, {
+          currentStep: MAX_AGENT_STEPS,
+          currentUrl: lastSnapshot?.url || job.url,
+          errorMessage: `Reached the maximum of ${MAX_AGENT_STEPS} browser steps before confirming submission.`
+        });
+      } catch (error) {
+        console.warn(
+          'Failed to mark application run ready for review:',
+          error instanceof Error ? error.message : error
+        );
+      }
+    }
     return {
       status: 'review_required',
       message: `Reached the maximum of ${MAX_AGENT_STEPS} browser steps before confirming submission.`,
@@ -4307,19 +4609,32 @@ export const applyToJob = async (
     const blockedExternalWebsite = isExternalWebsiteBlockedError(error);
     const blockedUrl = blockedExternalWebsite ? error.blockedUrl : undefined;
     const message = error instanceof Error ? error.message : 'Unknown application error';
+    let failureArtifact: ApplicationArtifact | undefined;
     try {
-      artifacts.push(
-        await captureRunScreenshot(
-          session.page,
-          runArtifactsDir,
-          logs.length + 1,
-          blockedExternalWebsite ? 'skipped-external-website' : 'failure-state'
-        )
+      failureArtifact = await captureRunScreenshot(
+        session.page,
+        runArtifactsDir,
+        logs.length + 1,
+        blockedExternalWebsite ? 'skipped-external-website' : 'failure-state'
       );
+      artifacts.push(failureArtifact);
     } catch {
       // Ignore screenshot failures while reporting the original apply error.
     }
     logs.push(`${blockedExternalWebsite ? 'Skipped' : 'Failed'}: ${message}`);
+    const finalRunUpdate = {
+      currentStep: logs.length,
+      currentUrl: blockedUrl || lastSnapshot?.url || job.url,
+      errorMessage: message,
+      errorStack: error instanceof Error ? error.stack : undefined,
+      screenshotFilePath: failureArtifact?.filePath,
+      screenshotUrl: failureArtifact?.url
+    };
+    if (blockedExternalWebsite) {
+      markRunSkipped(applicationRunId, finalRunUpdate);
+    } else {
+      markRunFailed(applicationRunId, finalRunUpdate);
+    }
     return {
       status: blockedExternalWebsite ? 'skipped' : 'failed',
       message,
