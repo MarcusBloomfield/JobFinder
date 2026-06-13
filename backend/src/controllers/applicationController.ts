@@ -10,20 +10,7 @@ import {
 import * as applicationAgentService from '../services/applicationAgentService';
 import * as applicationProfileFillService from '../services/applicationProfileFillService';
 import { checkAutoApplyDistance } from '../services/jobDistanceService';
-import {
-  ApplicationTriggerSource,
-  createTrackedApplication,
-  failTrackedApplication,
-  finalizeTrackedApplication
-} from '../services/applicationTrackingService';
-import {
-  createApplicationRun,
-  inferApplicationPlatform,
-  markApplicationRunFailed,
-  markApplicationRunSkipped,
-  markApplicationRunSubmitted
-} from '../services/applicationRunTrackingService';
-import { getApplicationAdapterForPlatform } from '../services/applicationAdapters/adapterRegistry';
+import { ApplicationTriggerSource } from '../services/applicationTrackingService';
 
 const validateJob = (job: any): job is Job => {
   return (
@@ -102,9 +89,6 @@ const validateApplicationProfile = (profile: any): profile is ApplicationProfile
 };
 
 export const applyToJob = async (req: Request, res: Response) => {
-  let trackedApplicationId: string | null = null;
-  let applicationRunId: string | null = null;
-
   try {
     const { job, resume, applicationProfile, triggerSource } = req.body;
 
@@ -163,86 +147,20 @@ export const applyToJob = async (req: Request, res: Response) => {
       });
     }
 
-    const trackedApplication = createTrackedApplication(
+    const result = await applicationAgentService.applyToJob(
       job,
       resume,
       applicationProfile,
       triggerSource || 'manual'
     );
-    trackedApplicationId = trackedApplication.id;
-    const platform = inferApplicationPlatform(job.url);
-    const applicationAdapter = getApplicationAdapterForPlatform(platform);
-    const applicationRun = createApplicationRun({
-      applicationId: trackedApplication.id,
-      platform,
-      currentUrl: job.url,
-      metadata: {
-        triggerSource: triggerSource || 'manual',
-        jobId: job.id,
-        jobTitle: job.title,
-        company: job.company,
-        adapter: applicationAdapter.id,
-        adapterName: applicationAdapter.displayName
-      }
-    });
-    applicationRunId = applicationRun.id;
-    const result = await applicationAgentService.applyToJob(
-      job,
-      resume,
-      applicationProfile,
-      trackedApplication.id,
-      applicationRun.id
-    );
-    finalizeTrackedApplication(trackedApplication.id, result);
-    if (result.status === 'applied') {
-      markApplicationRunSubmitted(applicationRun.id, {
-        currentStep: result.steps,
-        currentUrl: result.finalUrl,
-        screenshotFilePath: result.artifacts[result.artifacts.length - 1]?.filePath,
-        screenshotUrl: result.artifacts[result.artifacts.length - 1]?.url
-      });
-    } else if (result.status === 'skipped') {
-      markApplicationRunSkipped(applicationRun.id, {
-        currentStep: result.steps,
-        currentUrl: result.finalUrl,
-        errorMessage: result.message,
-        screenshotFilePath: result.artifacts[result.artifacts.length - 1]?.filePath,
-        screenshotUrl: result.artifacts[result.artifacts.length - 1]?.url
-      });
-    } else if (result.status === 'failed') {
-      markApplicationRunFailed(applicationRun.id, {
-        currentStep: result.steps,
-        currentUrl: result.finalUrl,
-        errorMessage: result.message,
-        screenshotFilePath: result.artifacts[result.artifacts.length - 1]?.filePath,
-        screenshotUrl: result.artifacts[result.artifacts.length - 1]?.url
-      });
-    }
 
     res.status(200).json({
       error: false,
       message: result.message,
-      data: {
-        ...result,
-        trackingId: trackedApplication.id,
-        runId: applicationRun.id
-      }
+      data: result
     });
   } catch (error) {
     console.error('Error in applyToJob controller:', error);
-
-    if (trackedApplicationId) {
-      failTrackedApplication(
-        trackedApplicationId,
-        error instanceof Error ? error.message : 'An unknown error occurred'
-      );
-    }
-    if (applicationRunId) {
-      markApplicationRunFailed(applicationRunId, {
-        errorMessage: error instanceof Error ? error.message : 'An unknown error occurred',
-        errorStack: error instanceof Error ? error.stack : undefined
-      });
-    }
 
     res.status(500).json({
       error: true,

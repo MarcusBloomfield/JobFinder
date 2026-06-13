@@ -5,10 +5,10 @@ import {
   ApplicationArtifact,
   ApplicationSnapshot,
   CoverLetterDocumentSnapshot,
-  JobApplicationResult,
   TailoredResumeSnapshot,
   buildApplicationSnapshot
-} from './applicationAgentService';
+} from './applicationAdapters/seekAdapter';
+import type { JobApplicationResult } from './applicationAgentService';
 import { ApplicationProfile } from '../models/ApplicationProfile';
 import { DEFAULT_JOB_DETAILS, JobApplicationMethod, JobDetails, normalizeJobDetails } from '../models/JobDetails';
 import { Job } from '../models/Job';

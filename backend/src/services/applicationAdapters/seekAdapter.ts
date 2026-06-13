@@ -2564,6 +2564,19 @@ const getChecklistDoneBlocker = (
   return undefined;
 };
 
+const FINAL_SUBMIT_PATTERN =
+  /\b(submit application|submit my application|send application|send my application|final submit|submit)\b/i;
+
+const hasFinalSubmitControl = (snapshot: PageSnapshot): boolean =>
+  snapshot.elements.some(element => {
+    if (element.disabled || element.hidden) {
+      return false;
+    }
+
+    const hints = `${element.text || ''} ${element.label || ''} ${element.name || ''}`.trim();
+    return Boolean(hints) && FINAL_SUBMIT_PATTERN.test(hints);
+  });
+
 const planNextAction = async (
   job: Job,
   activeResumeOption: ResumeOption,
@@ -2572,6 +2585,7 @@ const planNextAction = async (
   snapshot: PageSnapshot,
   checklistContext: ApplicationChecklistContext,
   coverLetterDocument: CoverLetterDocumentSnapshot,
+  requireFinalReview: boolean,
   logs: string[],
   extraInstruction?: string,
   attemptFeedback?: string
@@ -2622,6 +2636,9 @@ const planNextAction = async (
             'Treat current input values, selected options, checked states, resume uploads, and cover-letter drafts as editable drafts that must be verified and corrected when inaccurate, generic, or mismatched. ' +
             'If a resume or CV upload field is visible and the application expects one, use upload_resume to attach the most relevant available uploaded resume. Prefer switching resumes before answering detailed experience or profile questions when that keeps the answers consistent with the uploaded resume. ' +
             'Never type a cover letter or motivation answer directly into the website. The cover letter has already been written into coverLetterDocument. If a cover-letter upload field is visible, use upload_cover_letter. If the page only offers a required typed cover-letter/motivation field and no upload field, use done with finalStatus=review_required. ' +
+            (requireFinalReview
+              ? 'APPLY_AGENT_REQUIRE_FINAL_REVIEW is enabled. Do not click a final submit/send-application control. When the application is complete and ready for final submission, use done with finalStatus=review_required so the user can review and submit or continue. '
+              : '') +
             'Use done only when the application is submitted or the page clearly shows a confirmation or only non-essential follow-up remains. ' +
             'Use finalStatus=review_required only for captcha, MFA, legal declarations not supported by the resume, or truly missing personal information that is not already supplied by applicationProfile and cannot be conservatively inferred. ' +
             'If blocked or impossible, use fail with a concise message.'
@@ -2649,6 +2666,7 @@ const planNextAction = async (
               resumeSummary: compactText(activeResumeOption.resume.content, MAX_RESUME_CHARS),
               page: snapshot,
               recentLogs: logs.slice(-8),
+              requireFinalReview,
               extraInstruction: extraInstruction || null,
               attemptFeedback: attemptFeedback || null,
               outputSchema: {
@@ -3986,7 +4004,8 @@ export const applyToJob = async (
   resume: Resume,
   applicationProfile?: ApplicationProfile,
   applicationId?: string,
-  applicationRunId?: string
+  applicationRunId?: string,
+  requireFinalReview = false
 ): Promise<JobApplicationResult> => {
   const runArtifactsDir = createRunArtifactsDir(job);
   updateRunProgress(applicationRunId, {
@@ -4029,6 +4048,7 @@ export const applyToJob = async (
   let lastCoverLetterDocument: CoverLetterDocumentSnapshot | undefined = activeCoverLetterDocument;
   let coverLetterDocumentUploaded = false;
   let humanContinuationInstruction: string | undefined;
+  let finalReviewApproved = false;
 
   try {
     let currentPage = session.page;
@@ -4075,6 +4095,87 @@ export const applyToJob = async (
         snapshotFilePath: stepSnapshotArtifact.filePath,
         snapshotUrl: stepSnapshotArtifact.url
       });
+
+      if (requireFinalReview && !finalReviewApproved && hasFinalSubmitControl(lastSnapshot)) {
+        const reviewMessage =
+          'Application is ready for final review before submission.';
+        logs.push(`Step ${step}: ${reviewMessage}`);
+        const reviewArtifact = await captureRunScreenshot(
+          currentPage,
+          runArtifactsDir,
+          step,
+          `step-${step}-final-review-required`
+        );
+        artifacts.push(reviewArtifact);
+        const resolution = await waitForReviewRequiredResolution({
+          applicationId,
+          applicationRunId,
+          job,
+          pageUrl: lastSnapshot.url,
+          message: reviewMessage,
+          screenshot: reviewArtifact,
+          snapshot: stepSnapshotArtifact,
+          step,
+          logs
+        });
+
+        if (resolution === 'continued') {
+          finalReviewApproved = true;
+          humanContinuationInstruction = buildContinuationInstruction(reviewMessage);
+          lastSnapshot = await capturePageSnapshot(currentPage);
+          continue;
+        }
+
+        if (resolution === 'skipped' || resolution === 'failed') {
+          const update = {
+            currentStep: step,
+            currentUrl: lastSnapshot.url,
+            errorMessage:
+              resolution === 'skipped'
+                ? 'Application skipped after final review.'
+                : 'Application marked failed after final review.',
+            screenshotFilePath: reviewArtifact.filePath,
+            screenshotUrl: reviewArtifact.url,
+            snapshotFilePath: stepSnapshotArtifact.filePath,
+            snapshotUrl: stepSnapshotArtifact.url
+          };
+          if (resolution === 'skipped') {
+            markRunSkipped(applicationRunId, update);
+          } else {
+            markRunFailed(applicationRunId, update);
+          }
+          return {
+            status: resolution,
+            message:
+              resolution === 'skipped'
+                ? 'Application skipped after final review.'
+                : 'Application marked failed after final review.',
+            logs,
+            finalUrl: lastSnapshot.url,
+            steps: step,
+            artifacts,
+            applicationSnapshot: buildApplicationSnapshotFromOption(job, activeResumeOption, {
+              coverLetterText: lastCoverLetterText,
+              coverLetterUsed: coverLetterDocumentUploaded,
+              coverLetterDocument: lastCoverLetterDocument
+            })
+          };
+        }
+
+        return {
+          status: 'review_required',
+          message: reviewMessage,
+          logs,
+          finalUrl: lastSnapshot.url,
+          steps: step,
+          artifacts,
+          applicationSnapshot: buildApplicationSnapshotFromOption(job, activeResumeOption, {
+            coverLetterText: lastCoverLetterText,
+            coverLetterUsed: coverLetterDocumentUploaded,
+            coverLetterDocument: lastCoverLetterDocument
+          })
+        };
+      }
 
       const completionMessage = detectCompletion(lastSnapshot);
       if (completionMessage) {
@@ -4190,6 +4291,7 @@ export const applyToJob = async (
             workingSnapshot,
             checklistContext,
             activeCoverLetterDocument,
+            requireFinalReview,
             logs,
             combinedExtraInstruction || undefined,
             attemptFeedback
@@ -4208,6 +4310,7 @@ export const applyToJob = async (
               workingSnapshot,
               checklistContext,
               activeCoverLetterDocument,
+              requireFinalReview,
               logs,
               [humanContinuationInstruction, stepExtraInstruction].filter(Boolean).join(' ') || undefined,
               attemptFeedback
@@ -4227,6 +4330,7 @@ export const applyToJob = async (
               workingSnapshot,
               checklistContext,
               activeCoverLetterDocument,
+              requireFinalReview,
               logs,
               [humanContinuationInstruction, stepExtraInstruction].filter(Boolean).join(' ') || undefined,
               attemptFeedback
@@ -4749,7 +4853,8 @@ export const seekAdapter: ApplicationAdapter = {
         context.resume,
         context.applicationProfile,
         context.applicationId,
-        context.applicationRunId
+        context.applicationRunId,
+        Boolean(context.requireFinalReview)
       )
     )
 };

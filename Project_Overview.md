@@ -20,6 +20,7 @@
 - Application run records are exposed through `/api/application-runs`, including diagnostics, current URL/status/platform, screenshot/snapshot links, and the latest linked human intervention status.
 - The Progress page now includes an application run status summary and `ApplicationRunViewer` in the details modal for current/past browser attempts, screenshots, failures, and intervention state.
 - Application platform detection lives in `backend/src/services/applicationPlatformService.ts`. It detects seek, indeed, greenhouse, lever, workday, smartrecruiters, bamboohr, ashby, pageup, successfactors, taleo, and falls back to `generic`.
+- `applicationAgentService.ts` is the apply orchestrator. It creates tracked applications/runs, detects platform, enforces `APPLY_AGENT_ALLOWED_PLATFORMS`, selects the adapter, passes `APPLY_AGENT_REQUIRE_FINAL_REVIEW`, maps adapter statuses back to frontend-compatible results, and finalizes tracking.
 - Application adapter contracts live in `backend/src/services/applicationAdapters/types.ts`. The registry in `applicationAdapters/adapterRegistry.ts` currently registers `seek` and `generic`; unsupported known ATS platforms route to `generic` until dedicated adapters are added.
 
 ---
@@ -181,7 +182,7 @@ JobFinder/
 
 > **Cover letter examples** can be uploaded from the front-page Resume section as PDF/DOCX files. `POST /api/cover-letter-examples/parse` extracts text and saves the examples in the browser-saved `ApplicationProfile`; auto-apply sends up to three examples to the cover-letter generator as style-only references.
 
-> **Auto-apply resumes** are selected from user-uploaded resumes only. `applicationAdapters/seekAdapter.ts` ranks the active resume plus stored uploaded resumes by job relevance and uses the best original upload as the active resume. `applicationAgentService.ts` is now a thin adapter orchestrator/compat layer. No tailored/generated resume file is created for auto-apply. The tracked application stores the exact uploaded resume filename and full resume text snapshot so Progress and Profile can show what was actually used for each job.
+> **Auto-apply resumes** are selected from user-uploaded resumes only. `applicationAdapters/seekAdapter.ts` ranks the active resume plus stored uploaded resumes by job relevance and uses the best original upload as the active resume. `applicationAgentService.ts` owns run/tracking orchestration around the selected adapter. No tailored/generated resume file is created for auto-apply. The tracked application stores the exact uploaded resume filename and full resume text snapshot so Progress and Profile can show what was actually used for each job.
 
 > **Auto-apply distance checks** are implemented in `src/services/jobDistanceService.ts` and `backend/src/services/jobDistanceService.ts`. `ApplicationProfile` stores `homeAddress` and `maxAutoApplyDistanceKm`; if a max distance is set, auto-apply only proceeds when the job location can be resolved and is within range. Remote jobs are allowed.
 

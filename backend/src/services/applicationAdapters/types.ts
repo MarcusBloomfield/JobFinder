@@ -66,6 +66,7 @@ export interface ApplicationContext {
   applicationId?: string;
   applicationRunId?: string;
   platform: ApplicationPlatform;
+  requireFinalReview?: boolean;
   availableResumes?: Resume[];
   metadata?: Record<string, unknown>;
 }
