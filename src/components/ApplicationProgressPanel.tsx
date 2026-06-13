@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Job } from '../models/Job';
+import ApplicationRunViewer from './ApplicationRunViewer';
 import {
   DEFAULT_JOB_DETAILS,
   JOB_APPLICATION_METHOD_LABELS,
@@ -7,11 +8,16 @@ import {
   JobDetails
 } from '../models/JobDetails';
 import {
+  ApplicationRunRecord,
+  ApplicationRunStatus
+} from '../models/ApplicationRun';
+import {
   ApplicationProgressStage,
   ApplicationTrackingSummary,
   TrackedApplicationStatus,
   TrackedJobApplication
 } from '../models/ApplicationTracking';
+import { fetchApplicationRuns } from '../services/applicationRunService';
 
 interface ApplicationProgressPanelProps {
   summary: ApplicationTrackingSummary | null;
@@ -34,6 +40,24 @@ const STATUS_LABELS: Record<TrackedApplicationStatus, string> = {
   failed: 'Failed',
   skipped: 'Skipped'
 };
+
+const RUN_STATUS_LABELS: Record<ApplicationRunStatus, string> = {
+  running: 'Running',
+  waiting_for_user: 'Waiting For User',
+  ready_for_review: 'Ready For Review',
+  submitted: 'Submitted',
+  skipped: 'Skipped',
+  failed: 'Failed'
+};
+
+const createEmptyRunStatusCounts = (): Record<ApplicationRunStatus, number> => ({
+  running: 0,
+  waiting_for_user: 0,
+  ready_for_review: 0,
+  submitted: 0,
+  skipped: 0,
+  failed: 0
+});
 
 const APPLICATION_METHOD_OPTIONS = Object.entries(JOB_APPLICATION_METHOD_LABELS) as Array<
   [Exclude<JobApplicationMethod, ''>, string]
@@ -192,10 +216,21 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
   const [applicationEnrichmentError, setApplicationEnrichmentError] = useState<string | null>(null);
   const [enrichmentRequestedForApplicationId, setEnrichmentRequestedForApplicationId] =
     useState<string | null>(null);
+  const [applicationRuns, setApplicationRuns] = useState<ApplicationRunRecord[]>([]);
+  const [applicationRunsError, setApplicationRunsError] = useState<string | null>(null);
+  const [isLoadingApplicationRuns, setIsLoadingApplicationRuns] = useState<boolean>(false);
   const searchSnapshot = getSearchSnapshot(jobs);
   const selectedApplication = useMemo(
     () => history.find(application => application.id === selectedApplicationId) || null,
     [history, selectedApplicationId]
+  );
+  const applicationRunStatusCounts = useMemo(
+    () =>
+      applicationRuns.reduce((counts, run) => {
+        counts[run.status] += 1;
+        return counts;
+      }, createEmptyRunStatusCounts()),
+    [applicationRuns]
   );
   const activityYears = summary?.activityYears || [];
   const activeActivityYear = selectedActivityYear ?? activityYears[0] ?? new Date().getUTCFullYear();
@@ -222,6 +257,22 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
     [activityWeeks, activeActivityYear]
   );
 
+  const loadApplicationRunSummary = useCallback(async (): Promise<void> => {
+    setIsLoadingApplicationRuns(true);
+
+    try {
+      const runs = await fetchApplicationRuns({ limit: 200 });
+      setApplicationRuns(runs);
+      setApplicationRunsError(null);
+    } catch (error) {
+      setApplicationRunsError(
+        error instanceof Error ? error.message : 'Failed to load application run summary'
+      );
+    } finally {
+      setIsLoadingApplicationRuns(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (activityYears.length === 0) {
       setSelectedActivityYear(null);
@@ -232,6 +283,10 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
       currentYear && activityYears.includes(currentYear) ? currentYear : activityYears[0]
     );
   }, [activityYears]);
+
+  useEffect(() => {
+    void loadApplicationRunSummary();
+  }, [loadApplicationRunSummary]);
 
   useEffect(() => {
     if (!selectedApplication) {
@@ -336,6 +391,14 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
     }
   };
 
+  const handleRefresh = async (): Promise<void> => {
+    await Promise.all([onRefresh(), loadApplicationRunSummary()]);
+  };
+
+  const handleApplicationRunChanged = async (): Promise<void> => {
+    await Promise.all([onRefresh(), loadApplicationRunSummary()]);
+  };
+
   return (
     <>
       <section className="application-progress-page">
@@ -350,10 +413,10 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
           </div>
           <button
             className="application-progress-refresh-button"
-            disabled={isLoading}
-            onClick={() => void onRefresh()}
+            disabled={isLoading || isLoadingApplicationRuns}
+            onClick={() => void handleRefresh()}
           >
-            {isLoading ? 'Refreshing...' : 'Refresh Stats'}
+            {isLoading || isLoadingApplicationRuns ? 'Refreshing...' : 'Refresh Stats'}
           </button>
         </div>
 
@@ -412,6 +475,39 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
                 </article>
               </div>
             )}
+          </section>
+
+          <section className="application-progress-section-card application-progress-wide-card">
+            <div className="application-progress-subheader">
+              <h3>Apply Run Status</h3>
+              <span>
+                {isLoadingApplicationRuns
+                  ? 'Refreshing run data'
+                  : `${applicationRuns.length} browser runs loaded`}
+              </span>
+            </div>
+            {applicationRunsError && (
+              <p className="application-detail-error application-history-error">
+                {applicationRunsError}
+              </p>
+            )}
+            <div className="application-run-summary-grid">
+              {(
+                [
+                  'waiting_for_user',
+                  'ready_for_review',
+                  'failed',
+                  'skipped'
+                ] as ApplicationRunStatus[]
+              ).map(status => (
+                <article key={status} className="application-progress-stat-card">
+                  <span className="application-progress-stat-label">
+                    {RUN_STATUS_LABELS[status]}
+                  </span>
+                  <strong>{applicationRunStatusCounts[status]}</strong>
+                </article>
+              ))}
+            </div>
           </section>
 
           <section className="application-progress-section-card application-progress-wide-card">
@@ -688,6 +784,11 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
                 <strong>{selectedApplication.triggerSource === 'bulk' ? 'Bulk auto-apply' : 'Manual apply'}</strong>
               </div>
             </div>
+
+            <ApplicationRunViewer
+              applicationId={selectedApplication.id}
+              onRunsChanged={handleApplicationRunChanged}
+            />
 
             <div className="application-detail-job-details">
               <div className="application-progress-subheader">

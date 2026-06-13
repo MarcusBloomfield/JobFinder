@@ -19,6 +19,7 @@ export interface JobApplicationResult {
   finalUrl: string;
   steps: number;
   trackingId?: string;
+  runId?: string;
   artifacts: Array<{
     step: number;
     label: string;

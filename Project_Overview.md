@@ -18,6 +18,7 @@
 - Auto-apply handles SEEK's stable first job page and choose-documents page with deterministic Playwright logic before asking the LLM. The document page uploads the selected resume and generated cover-letter DOCX through Playwright file payloads, so cover-letter upload target detection no longer depends on screenshots or native file picker dialogs.
 - Auto-apply now writes a separate `application_runs` SQLite row for each browser attempt, linked to the existing `job_applications` row. Runs track platform, status, current step/URL, latest error, screenshot path, and snapshot path.
 - Application run records are exposed through `/api/application-runs`, including diagnostics, current URL/status/platform, screenshot/snapshot links, and the latest linked human intervention status.
+- The Progress page now includes an application run status summary and `ApplicationRunViewer` in the details modal for current/past browser attempts, screenshots, failures, and intervention state.
 
 ---
 
