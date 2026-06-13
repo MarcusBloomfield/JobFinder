@@ -19,6 +19,7 @@
 - Auto-apply now writes a separate `application_runs` SQLite row for each browser attempt, linked to the existing `job_applications` row. Runs track platform, status, current step/URL, latest error, screenshot path, and snapshot path.
 - Application run records are exposed through `/api/application-runs`, including diagnostics, current URL/status/platform, screenshot/snapshot links, and the latest linked human intervention status.
 - The Progress page now includes an application run status summary and `ApplicationRunViewer` in the details modal for current/past browser attempts, screenshots, failures, and intervention state.
+- Application platform detection lives in `backend/src/services/applicationPlatformService.ts`. It detects seek, indeed, greenhouse, lever, workday, smartrecruiters, bamboohr, ashby, pageup, successfactors, taleo, and falls back to `generic`.
 
 ---
 
@@ -187,6 +188,7 @@ JobFinder/
 
 > **Application runs** are persisted by `backend/src/services/applicationRunTrackingService.ts` in the shared SQLite database. Statuses are `running`, `waiting_for_user`, `ready_for_review`, `submitted`, `skipped`, and `failed`; this keeps attempt diagnostics separate from final `job_applications` records.
 > `backend/src/controllers/applicationRunController.ts` and `backend/src/routes/applicationRunRoutes.ts` expose run listing/detail/cancel APIs for frontend polling and debug views.
+> Run platform values come from `backend/src/services/applicationPlatformService.ts`; use `npm run test:platform-detection --prefix backend` for a focused smoke check.
 
 > **Profile Fill with AI** is available on the Profile page. It sends stored parsed resumes plus the current browser-saved profile to `POST /api/apply/profile/fill`, where `applicationProfileFillService.ts` asks OpenAI to extract only resume-supported fields and preserve existing profile values unless the resume explicitly replaces them.
 

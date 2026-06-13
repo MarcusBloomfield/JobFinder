@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { detectPlatform } from './applicationPlatformService';
 
 type SqliteStatement = {
   run: (...params: unknown[]) => { changes: number; lastInsertRowid: number | bigint };
@@ -201,29 +202,7 @@ export const initializeApplicationRunTracking = (): void => {
 };
 
 export const inferApplicationPlatform = (url?: string | null): string => {
-  const normalizedUrl = normalizeOptionalText(url);
-  if (!normalizedUrl) {
-    return 'unknown';
-  }
-
-  try {
-    const hostname = new URL(normalizedUrl).hostname.toLowerCase();
-    if (hostname.includes('seek.')) {
-      return 'seek';
-    }
-
-    if (hostname.includes('linkedin.')) {
-      return 'linkedin';
-    }
-
-    if (hostname.includes('indeed.')) {
-      return 'indeed';
-    }
-
-    return hostname.replace(/^www\./, '') || 'company_website';
-  } catch {
-    return 'unknown';
-  }
+  return detectPlatform(url);
 };
 
 export const createApplicationRun = (input: CreateApplicationRunInput): ApplicationRunRecord => {
