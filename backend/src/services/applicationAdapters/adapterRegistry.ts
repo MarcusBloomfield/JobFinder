@@ -1,8 +1,4 @@
 import {
-  applyToJob as applyWithSeekAgent,
-  JobApplicationResult
-} from '../applicationAgentService';
-import {
   ApplicationPlatform,
   detectPlatform
 } from '../applicationPlatformService';
@@ -11,6 +7,7 @@ import {
   ApplicationContext,
   ApplicationResult
 } from './types';
+import { seekAdapter } from './seekAdapter';
 
 export const KNOWN_APPLICATION_PLATFORMS: ApplicationPlatform[] = [
   'seek',
@@ -28,50 +25,6 @@ export const KNOWN_APPLICATION_PLATFORMS: ApplicationPlatform[] = [
 ];
 
 export type ApplicationAdapterId = 'seek' | 'generic';
-
-const mapSeekResultStatus = (
-  status: JobApplicationResult['status']
-): ApplicationResult['status'] => {
-  switch (status) {
-    case 'applied':
-      return 'submitted';
-    case 'review_required':
-      return 'ready_for_review';
-    case 'skipped':
-      return 'skipped';
-    case 'failed':
-    default:
-      return 'failed';
-  }
-};
-
-const mapSeekResult = (result: JobApplicationResult): ApplicationResult => ({
-  status: mapSeekResultStatus(result.status),
-  message: result.message,
-  logs: result.logs,
-  finalUrl: result.finalUrl,
-  steps: result.steps,
-  artifacts: result.artifacts,
-  applicationSnapshot: result.applicationSnapshot
-});
-
-export const seekAdapter: ApplicationAdapter = {
-  id: 'seek',
-  displayName: 'SEEK',
-  platform: 'seek',
-  supportedPlatforms: ['seek'],
-  canAutoSubmit: true,
-  apply: async (context: ApplicationContext): Promise<ApplicationResult> =>
-    mapSeekResult(
-      await applyWithSeekAgent(
-        context.job,
-        context.resume,
-        context.applicationProfile,
-        context.applicationId,
-        context.applicationRunId
-      )
-    )
-};
 
 export const genericAdapter: ApplicationAdapter = {
   id: 'generic',
