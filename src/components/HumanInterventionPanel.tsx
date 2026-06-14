@@ -3,6 +3,7 @@ import {
   HumanInterventionAction,
   HumanInterventionRecord,
   fetchPendingHumanInterventions,
+  getHumanInterventionArtifactUrl,
   getHumanInterventionScreenshotUrl,
   resolveHumanIntervention
 } from '../services/humanInterventionApi';
@@ -85,6 +86,13 @@ const getRoleLabel = (intervention: HumanInterventionRecord): string =>
     'positionTitle',
     'title'
   ]) || intervention.title;
+
+const getArtifactLabel = (kind: string, label?: string): string =>
+  (label || kind)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, character => character.toUpperCase());
 
 const HumanInterventionPanel: React.FC<HumanInterventionPanelProps> = ({ onResolved }) => {
   const [interventions, setInterventions] = useState<HumanInterventionRecord[]>([]);
@@ -249,6 +257,9 @@ const HumanInterventionPanel: React.FC<HumanInterventionPanelProps> = ({ onResol
                       {intervention.applicationId && (
                         <span>Application: {intervention.applicationId}</span>
                       )}
+                      {intervention.applicationRunId && (
+                        <span>Run: {intervention.applicationRunId}</span>
+                      )}
                       <time dateTime={intervention.createdAt}>
                         Waiting since {formatTimestamp(intervention.createdAt)}
                       </time>
@@ -259,6 +270,19 @@ const HumanInterventionPanel: React.FC<HumanInterventionPanelProps> = ({ onResol
                           {intervention.pageUrl}
                         </a>
                       )}
+                      {(intervention.artifacts || [])
+                        .filter(artifact => artifact.url)
+                        .slice(-8)
+                        .map(artifact => (
+                          <a
+                            key={`${artifact.kind}-${artifact.step}-${artifact.label}`}
+                            href={getHumanInterventionArtifactUrl(artifact.url)}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {getArtifactLabel(artifact.kind, artifact.label)}
+                          </a>
+                        ))}
                     </div>
                   </div>
 

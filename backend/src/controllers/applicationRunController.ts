@@ -38,7 +38,17 @@ interface ApplicationRunApiRecord extends ApplicationRunRecord {
   };
   intervention?: Pick<
     HumanInterventionRecord,
-    'id' | 'status' | 'reason' | 'title' | 'message' | 'pageUrl' | 'screenshotUrl' | 'createdAt' | 'updatedAt' | 'resolvedAt'
+    | 'id'
+    | 'applicationRunId'
+    | 'status'
+    | 'reason'
+    | 'title'
+    | 'message'
+    | 'pageUrl'
+    | 'screenshotUrl'
+    | 'createdAt'
+    | 'updatedAt'
+    | 'resolvedAt'
   >;
 }
 
@@ -63,8 +73,22 @@ const normalizeText = (value: unknown): string | undefined =>
 
 const getRunId = (req: Request): string | undefined => normalizeText(req.params.id);
 
-const getLatestIntervention = (applicationId: string): HumanInterventionRecord | undefined =>
-  listHumanInterventionsForApplication(applicationId)[0];
+const getInterventionRunId = (intervention: HumanInterventionRecord): string | undefined => {
+  const metadataRunId = intervention.metadata?.applicationRunId;
+  return intervention.applicationRunId ||
+    (typeof metadataRunId === 'string' && metadataRunId.trim() ? metadataRunId.trim() : undefined);
+};
+
+const getLatestInterventionForRun = (run: ApplicationRunRecord): HumanInterventionRecord | undefined => {
+  const interventions = listHumanInterventionsForApplication(run.applicationId);
+  const directMatch = interventions.find(intervention => getInterventionRunId(intervention) === run.id);
+
+  if (directMatch) {
+    return directMatch;
+  }
+
+  return interventions.find(intervention => !getInterventionRunId(intervention));
+};
 
 const getRunArtifacts = (metadata: Record<string, unknown> | undefined): ApplicationRunArtifact[] => {
   const value = metadata?.artifactUrls;
@@ -88,7 +112,7 @@ const getRunArtifacts = (metadata: Record<string, unknown> | undefined): Applica
 };
 
 const toApplicationRunApiRecord = (run: ApplicationRunRecord): ApplicationRunApiRecord => {
-  const intervention = getLatestIntervention(run.applicationId);
+  const intervention = getLatestInterventionForRun(run);
   const artifacts = getRunArtifacts(run.metadata);
 
   return {
@@ -111,6 +135,7 @@ const toApplicationRunApiRecord = (run: ApplicationRunRecord): ApplicationRunApi
     intervention: intervention
       ? {
           id: intervention.id,
+          applicationRunId: intervention.applicationRunId,
           status: intervention.status,
           reason: intervention.reason,
           title: intervention.title,

@@ -31,6 +31,7 @@ export type HumanInterventionResolutionAction = Exclude<HumanInterventionStatus,
 
 export interface HumanInterventionInput {
   applicationId?: string;
+  applicationRunId?: string;
   reason: HumanInterventionReason;
   title: string;
   message: string;
@@ -52,6 +53,7 @@ export interface HumanInterventionRecord extends HumanInterventionInput {
 interface HumanInterventionRow {
   id: string;
   application_id: string | null;
+  application_run_id: string | null;
   reason: HumanInterventionReason;
   title: string;
   message: string;
@@ -126,6 +128,7 @@ const getDatabase = (): SqliteDatabase => {
     CREATE TABLE IF NOT EXISTS human_interventions (
       id TEXT PRIMARY KEY,
       application_id TEXT,
+      application_run_id TEXT,
       reason TEXT NOT NULL,
       title TEXT NOT NULL,
       message TEXT NOT NULL,
@@ -155,6 +158,21 @@ const getDatabase = (): SqliteDatabase => {
 
     CREATE INDEX IF NOT EXISTS idx_human_interventions_application_id
       ON human_interventions (application_id, created_at DESC);
+
+  `);
+
+  const columns = database
+    .prepare('PRAGMA table_info(human_interventions)')
+    .all<{ name: string }>();
+  if (!columns.some(column => column.name === 'application_run_id')) {
+    database.exec(`
+      ALTER TABLE human_interventions ADD COLUMN application_run_id TEXT;
+    `);
+  }
+
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_human_interventions_application_run_id
+      ON human_interventions (application_run_id, created_at DESC);
   `);
 
   return database;
@@ -163,6 +181,7 @@ const getDatabase = (): SqliteDatabase => {
 const mapHumanInterventionRow = (row: HumanInterventionRow): HumanInterventionRecord => ({
   id: row.id,
   applicationId: normalizeOptionalText(row.application_id),
+  applicationRunId: normalizeOptionalText(row.application_run_id),
   reason: REASONS.includes(row.reason) ? row.reason : 'unknown',
   title: row.title,
   message: row.message,
@@ -194,6 +213,7 @@ export const createHumanIntervention = (
         INSERT INTO human_interventions (
           id,
           application_id,
+          application_run_id,
           reason,
           title,
           message,
@@ -206,12 +226,13 @@ export const createHumanIntervention = (
           created_at,
           updated_at,
           resolved_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?, NULL)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?, NULL)
       `
     )
     .run(
       id,
       intervention.applicationId || null,
+      intervention.applicationRunId || null,
       reason,
       intervention.title,
       intervention.message,

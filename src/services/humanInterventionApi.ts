@@ -18,6 +18,7 @@ export type HumanInterventionAction = Exclude<HumanInterventionStatus, 'pending'
 export interface HumanInterventionRecord {
   id: string;
   applicationId?: string;
+  applicationRunId?: string;
   reason: HumanInterventionReason;
   title: string;
   message: string;
@@ -89,4 +90,12 @@ export const getHumanInterventionScreenshotUrl = (
   }
 
   return undefined;
+};
+
+export const getHumanInterventionArtifactUrl = (url?: string): string | undefined => {
+  if (!url) {
+    return undefined;
+  }
+
+  return url.startsWith('/') ? `${API_ORIGIN}${url}` : url;
 };

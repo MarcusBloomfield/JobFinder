@@ -10,6 +10,7 @@ export type ApplicationRunInterventionStatus = 'pending' | 'continued' | 'skippe
 
 export interface ApplicationRunIntervention {
   id: string;
+  applicationRunId?: string;
   status: ApplicationRunInterventionStatus;
   reason: string;
   title: string;

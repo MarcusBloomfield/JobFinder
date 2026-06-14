@@ -3697,6 +3697,7 @@ const waitForReviewRequiredResolution = async (options: {
 
   const intervention = createHumanIntervention({
     applicationId: options.applicationId,
+    applicationRunId: options.applicationRunId,
     reason: inferHumanInterventionReason(options.message),
     title: `${options.job.company} - ${options.job.title}`,
     message: options.message,
@@ -3708,6 +3709,7 @@ const waitForReviewRequiredResolution = async (options: {
       jobTitle: options.job.title,
       company: options.job.company,
       jobUrl: options.job.url,
+      applicationRunId: options.applicationRunId,
       step: options.step,
       artifactUrls: options.diagnostics || []
     }
