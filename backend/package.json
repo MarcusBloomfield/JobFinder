@@ -10,7 +10,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:openai": "ts-node src/test-openai.ts",
     "test:platform-detection": "ts-node src/test-platform-detection.ts",
-    "test:adapter-registry": "ts-node src/test-application-adapter-registry.ts"
+    "test:adapter-registry": "ts-node src/test-application-adapter-registry.ts",
+    "test:form-extraction": "ts-node src/test-form-extraction.ts"
   },
   "keywords": [],
   "author": "",

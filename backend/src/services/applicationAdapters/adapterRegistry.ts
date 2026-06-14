@@ -8,6 +8,7 @@ import {
   ApplicationResult
 } from './types';
 import { seekAdapter } from './seekAdapter';
+import { FORM_EXTRACTION_SERVICE_VERSION } from '../formExtractionService';
 
 export const KNOWN_APPLICATION_PLATFORMS: ApplicationPlatform[] = [
   'seek',
@@ -57,7 +58,12 @@ export const genericAdapter: ApplicationAdapter = {
     artifacts: [],
     metadata: {
       platform: context.platform,
-      adapterId: 'generic'
+      adapterId: 'generic',
+      formExtraction: {
+        service: 'formExtractionService',
+        version: FORM_EXTRACTION_SERVICE_VERSION,
+        ready: true
+      }
     }
   })
 };

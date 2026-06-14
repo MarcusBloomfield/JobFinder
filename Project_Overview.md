@@ -274,6 +274,7 @@ JobFinder/
 - The apply controller does not scrape/enrich the listing during an apply run; the visible browser opens the job URL only from the application agent.
 - Review-required stops create human intervention records and wait for Continue Bot, Skip Application, or Mark Failed from the Progress page.
 - Each apply attempt creates an `application_runs` record before launching Playwright. The agent updates the run on each step with the current URL plus latest screenshot/snapshot artifacts, then marks it submitted, waiting_for_user, ready_for_review, skipped, or failed.
+- `backend/src/services/formExtractionService.ts` extracts visible enabled form controls for the Universal Apply generic adapter, including labels, surrounding text, options, current values, required/visibility state, and stable selector hints.
 
 ---
 
