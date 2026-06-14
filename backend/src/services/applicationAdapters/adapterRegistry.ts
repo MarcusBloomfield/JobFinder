@@ -9,6 +9,7 @@ import {
 } from './types';
 import { seekAdapter } from './seekAdapter';
 import { FORM_EXTRACTION_SERVICE_VERSION } from '../formExtractionService';
+import { FORM_MAPPING_SERVICE_VERSION } from '../formMappingService';
 
 export const KNOWN_APPLICATION_PLATFORMS: ApplicationPlatform[] = [
   'seek',
@@ -62,6 +63,11 @@ export const genericAdapter: ApplicationAdapter = {
       formExtraction: {
         service: 'formExtractionService',
         version: FORM_EXTRACTION_SERVICE_VERSION,
+        ready: true
+      },
+      formMapping: {
+        service: 'formMappingService',
+        version: FORM_MAPPING_SERVICE_VERSION,
         ready: true
       }
     }

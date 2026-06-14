@@ -11,7 +11,8 @@
     "test:openai": "ts-node src/test-openai.ts",
     "test:platform-detection": "ts-node src/test-platform-detection.ts",
     "test:adapter-registry": "ts-node src/test-application-adapter-registry.ts",
-    "test:form-extraction": "ts-node src/test-form-extraction.ts"
+    "test:form-extraction": "ts-node src/test-form-extraction.ts",
+    "test:form-mapping": "ts-node src/test-form-mapping.ts"
   },
   "keywords": [],
   "author": "",
