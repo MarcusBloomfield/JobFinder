@@ -3,13 +3,10 @@ import {
   detectPlatform
 } from '../applicationPlatformService';
 import {
-  ApplicationAdapter,
-  ApplicationContext,
-  ApplicationResult
+  ApplicationAdapter
 } from './types';
 import { seekAdapter } from './seekAdapter';
-import { FORM_EXTRACTION_SERVICE_VERSION } from '../formExtractionService';
-import { FORM_MAPPING_SERVICE_VERSION } from '../formMappingService';
+import { genericAdapter } from './genericAdapter';
 
 export const KNOWN_APPLICATION_PLATFORMS: ApplicationPlatform[] = [
   'seek',
@@ -27,52 +24,6 @@ export const KNOWN_APPLICATION_PLATFORMS: ApplicationPlatform[] = [
 ];
 
 export type ApplicationAdapterId = 'seek' | 'generic';
-
-export const genericAdapter: ApplicationAdapter = {
-  id: 'generic',
-  displayName: 'Generic application flow',
-  platform: 'generic',
-  supportedPlatforms: [
-    'indeed',
-    'greenhouse',
-    'lever',
-    'workday',
-    'smartrecruiters',
-    'bamboohr',
-    'ashby',
-    'pageup',
-    'successfactors',
-    'taleo',
-    'generic'
-  ],
-  canAutoSubmit: false,
-  apply: async (context: ApplicationContext): Promise<ApplicationResult> => ({
-    status: 'ready_for_review',
-    message:
-      `${context.platform} applications are routed to the generic adapter until a platform-specific adapter exists.`,
-    logs: [
-      `Generic adapter selected for ${context.platform}.`,
-      'No platform-specific automation has been registered yet.'
-    ],
-    finalUrl: context.job.url,
-    steps: 0,
-    artifacts: [],
-    metadata: {
-      platform: context.platform,
-      adapterId: 'generic',
-      formExtraction: {
-        service: 'formExtractionService',
-        version: FORM_EXTRACTION_SERVICE_VERSION,
-        ready: true
-      },
-      formMapping: {
-        service: 'formMappingService',
-        version: FORM_MAPPING_SERVICE_VERSION,
-        ready: true
-      }
-    }
-  })
-};
 
 const ADAPTERS_BY_ID: Record<ApplicationAdapterId, ApplicationAdapter> = {
   seek: seekAdapter,

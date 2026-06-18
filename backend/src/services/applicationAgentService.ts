@@ -223,7 +223,10 @@ export const applyToJob = async (
 ): Promise<JobApplicationResult> => {
   const platform = detectPlatform(job.url);
   const adapter = getApplicationAdapterForPlatform(platform);
-  const requireFinalReview = isEnabled(process.env.APPLY_AGENT_REQUIRE_FINAL_REVIEW);
+  const requireFinalReview =
+    process.env.APPLY_AGENT_REQUIRE_FINAL_REVIEW === undefined
+      ? true
+      : isEnabled(process.env.APPLY_AGENT_REQUIRE_FINAL_REVIEW);
   const allowedPlatforms = getAllowedPlatforms();
   const trackedApplication = createTrackedApplication(
     job,
