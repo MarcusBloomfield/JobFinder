@@ -655,6 +655,14 @@ const isDecisionAlreadySatisfied = (
     return normalizeForCompare(control.currentValue) === normalizeForCompare(decision.value);
   }
 
+  if (decision.action === 'check') {
+    return Boolean(control.checked);
+  }
+
+  if (decision.action === 'uncheck') {
+    return control.checked === false;
+  }
+
   return false;
 };
 
@@ -678,6 +686,12 @@ const applyMappedDecision = async (
         await locator.selectOption(decision.value || '');
       }
       return `Selected ${decision.value || 'option'} for ${decision.fieldKey || 'field'}.`;
+    case 'check':
+      await locator.check();
+      return `Checked ${decision.fieldKey || 'field'} using a saved answer.`;
+    case 'uncheck':
+      await locator.uncheck();
+      return `Unchecked ${decision.fieldKey || 'field'} using a saved answer.`;
     case 'upload_resume':
       await locator.setInputFiles(resumeUploadPayload);
       return `Uploaded resume "${resumeUploadPayload.name}".`;

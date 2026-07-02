@@ -13,9 +13,11 @@ import applicationRunRoutes from './routes/applicationRunRoutes';
 import applicationTrackingRoutes from './routes/applicationTrackingRoutes';
 import humanInterventionRoutes from './routes/humanInterventionRoutes';
 import coverLetterExampleRoutes from './routes/coverLetterExampleRoutes';
+import savedFormAnswerRoutes from './routes/savedFormAnswerRoutes';
 import { initializeApplicationTracking } from './services/applicationTrackingService';
 import { initializeApplicationRunTracking } from './services/applicationRunTrackingService';
 import { initializeHumanInterventions } from './services/humanInterventionService';
+import { initializeSavedFormAnswers } from './services/savedFormAnswerService';
 
 // Load environment variables
 dotenv.config();
@@ -26,6 +28,7 @@ const PORT = process.env.PORT || 5000;
 initializeApplicationTracking();
 initializeApplicationRunTracking();
 initializeHumanInterventions();
+initializeSavedFormAnswers();
 
 // Middleware
 app.use(cors());
@@ -42,6 +45,7 @@ app.use('/api/application-runs', applicationRunRoutes);
 app.use('/api/applications', applicationTrackingRoutes);
 app.use('/api/interventions', humanInterventionRoutes);
 app.use('/api/cover-letter-examples', coverLetterExampleRoutes);
+app.use('/api/saved-form-answers', savedFormAnswerRoutes);
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {

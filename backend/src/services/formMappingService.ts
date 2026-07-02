@@ -5,13 +5,18 @@ import {
   FormExtractionResult,
   FormSelectorHint
 } from './formExtractionService';
+import {
+  findHighConfidenceSavedFormAnswer,
+  SavedFormAnswerControlKind
+} from './savedFormAnswerService';
 
 export const FORM_MAPPING_SERVICE_VERSION = '1.0';
 
 export type FormMappingStatus = 'MAP' | 'NEEDS_HUMAN' | 'SKIP';
-export type FormMappingSource = 'deterministic' | 'openai';
+export type FormMappingSource = 'deterministic' | 'saved_answer' | 'openai';
 
 export type FormMappedFieldKey =
+  | 'savedAnswer'
   | 'fullName'
   | 'firstName'
   | 'lastName'
@@ -32,6 +37,8 @@ export type FormMappedFieldKey =
 export type FormMappingAction =
   | 'fill'
   | 'select'
+  | 'check'
+  | 'uncheck'
   | 'upload_resume'
   | 'upload_cover_letter'
   | 'needs_human'
@@ -61,6 +68,7 @@ export interface FormMappingDecision {
   value?: string;
   selectorHint?: FormSelectorHint;
   humanReviewCategory?: FormHumanReviewCategory;
+  savedFormAnswerId?: string;
 }
 
 export interface FormMappingOptions {
@@ -80,6 +88,7 @@ export interface FormMappingResult {
   skipped: FormMappingDecision[];
   metadata: {
     deterministicCount: number;
+    savedAnswerCount: number;
     openAICount: number;
     needsHumanCount: number;
   };
@@ -98,6 +107,8 @@ const FORM_MAPPING_MIN_CALL_INTERVAL_MS = Number(
 
 const MAX_OPENAI_CONTROLS = 20;
 const MAX_CONTEXT_CHARS = 260;
+const TRUE_PATTERN = /^(true|yes|y|1|checked|check|on)$/i;
+const FALSE_PATTERN = /^(false|no|n|0|unchecked|uncheck|off)$/i;
 
 let openaiClient: OpenAI | null = null;
 let openAICallChain: Promise<void> = Promise.resolve();
@@ -372,6 +383,48 @@ const optionMatchesValue = (control: ExtractedFormControl, value: string): boole
   });
 };
 
+const radioMatchesValue = (control: ExtractedFormControl, value: string): boolean => {
+  const normalizedValue = normalizeForMatching(value);
+  if (!normalizedValue) {
+    return false;
+  }
+
+  return [
+    control.currentValue,
+    control.labelText,
+    control.ariaLabel,
+    control.placeholder,
+    control.name
+  ]
+    .map(candidate => normalizeForMatching(candidate))
+    .filter(Boolean)
+    .some(candidate => candidate === normalizedValue);
+};
+
+const getSavedAnswerControlKind = (control: ExtractedFormControl): SavedFormAnswerControlKind => {
+  if (control.tag === 'textarea') {
+    return 'textarea';
+  }
+
+  if (control.tag === 'select') {
+    return 'select';
+  }
+
+  if (control.type === 'checkbox') {
+    return 'checkbox';
+  }
+
+  if (control.type === 'radio') {
+    return 'radio';
+  }
+
+  if (control.type === 'file') {
+    return 'file';
+  }
+
+  return 'text';
+};
+
 const actionForControl = (
   control: ExtractedFormControl,
   value: string
@@ -381,6 +434,22 @@ const actionForControl = (
   }
 
   if (control.tag === 'textarea' || control.tag === 'input') {
+    if (control.type === 'checkbox') {
+      if (TRUE_PATTERN.test(value.trim())) {
+        return 'check';
+      }
+
+      if (FALSE_PATTERN.test(value.trim())) {
+        return 'uncheck';
+      }
+
+      return undefined;
+    }
+
+    if (control.type === 'radio') {
+      return radioMatchesValue(control, value) ? 'check' : undefined;
+    }
+
     return 'fill';
   }
 
@@ -391,6 +460,59 @@ const findHumanReviewCategory = (text: string): FormHumanReviewCategory | undefi
   HUMAN_REVIEW_RULES.find(rule => hasAny(text, rule.patterns))?.category;
 
 const hasValue = (value: string): boolean => compactText(value, 4000).length > 0;
+
+const findSavedAnswerForControl = (control: ExtractedFormControl) => {
+  const candidateQuestions = [
+    control.labelText,
+    control.ariaLabel,
+    control.placeholder,
+    control.parentText,
+    control.nearbyText,
+    getControlText(control)
+  ]
+    .map(value => compactText(value, 800))
+    .filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index);
+
+  for (const question of candidateQuestions) {
+    const savedAnswer = findHighConfidenceSavedFormAnswer({
+      question,
+      controlKind: getSavedAnswerControlKind(control),
+      options: control.options
+    });
+
+    if (savedAnswer) {
+      return savedAnswer;
+    }
+  }
+
+  return null;
+};
+
+const buildSavedAnswerDecision = (
+  control: ExtractedFormControl
+): FormMappingDecision | undefined => {
+  const savedAnswer = findSavedAnswerForControl(control);
+
+  if (!savedAnswer) {
+    return undefined;
+  }
+
+  const action = actionForControl(control, savedAnswer.answer);
+  if (!action) {
+    return undefined;
+  }
+
+  return buildDecision(control, {
+    status: 'MAP',
+    action,
+    source: 'saved_answer',
+    confidence: 'high',
+    fieldKey: 'savedAnswer',
+    value: savedAnswer.answer,
+    savedFormAnswerId: savedAnswer.id,
+    reason: `Reused an explicitly approved saved answer for "${compactText(savedAnswer.question, 120)}".`
+  });
+};
 
 const buildSafeMapping = (
   control: ExtractedFormControl,
@@ -422,11 +544,11 @@ const buildSafeMapping = (
   return mapDecision(control, fieldKey, action, value, reason, confidence, source);
 };
 
-const deterministicMapControl = (
+const deterministicMapControl = async (
   control: ExtractedFormControl,
   profile: ApplicationProfile,
   options: FormMappingOptions
-): FormMappingDecision | undefined => {
+): Promise<FormMappingDecision | undefined> => {
   const text = normalizeForMatching(getControlText(control));
 
   if (!control.visible || control.disabled) {
@@ -435,6 +557,11 @@ const deterministicMapControl = (
 
   if (control.tag === 'button') {
     return skipDecision(control, 'Buttons are navigation or submission controls, not fillable application fields.', 'high');
+  }
+
+  const savedAnswerDecision = buildSavedAnswerDecision(control);
+  if (savedAnswerDecision) {
+    return savedAnswerDecision;
   }
 
   const humanCategory = findHumanReviewCategory(text);
@@ -788,11 +915,11 @@ export const mapExtractedFormControls = async (
   const deterministicDecisions = new Map<number, FormMappingDecision>();
   const openAICandidates: ExtractedFormControl[] = [];
 
-  extraction.controls.forEach(control => {
-    const decision = deterministicMapControl(control, applicationProfile, options);
+  for (const control of extraction.controls) {
+    const decision = await deterministicMapControl(control, applicationProfile, options);
     if (decision) {
       deterministicDecisions.set(control.index, decision);
-      return;
+      continue;
     }
 
     if (isEligibleForOpenAIFallback(control)) {
@@ -800,7 +927,7 @@ export const mapExtractedFormControls = async (
     } else {
       deterministicDecisions.set(control.index, buildUnavailableDecision(control));
     }
-  });
+  }
 
   const openAIDecisions = await mapWithOpenAI(openAICandidates, applicationProfile, options);
   const openAIDecisionsByIndex = new Map(openAIDecisions.map(decision => [decision.controlIndex, decision]));
@@ -829,6 +956,7 @@ export const mapExtractedFormControls = async (
     skipped,
     metadata: {
       deterministicCount: decisions.filter(decision => decision.source === 'deterministic').length,
+      savedAnswerCount: decisions.filter(decision => decision.source === 'saved_answer').length,
       openAICount: decisions.filter(decision => decision.source === 'openai').length,
       needsHumanCount: needsHuman.length
     }
