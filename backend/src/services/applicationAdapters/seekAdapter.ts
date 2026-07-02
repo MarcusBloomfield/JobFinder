@@ -1621,6 +1621,11 @@ const capturePageSnapshot = async (page: Page): Promise<PageSnapshot> => {
 };
 
 const detectCompletion = (snapshot: PageSnapshot): string | null => {
+  const normalizedUrl = snapshot.url.toLowerCase();
+  if (normalizedUrl.includes('apply/success')) {
+    return 'Detected SEEK application success URL.';
+  }
+
   const combined = `${snapshot.title}\n${snapshot.visibleText}`.toLowerCase();
   const successPatterns = [
     /application submitted/,
@@ -4391,6 +4396,30 @@ export const applyToJob = async (
         snapshotUrl: stepSnapshotArtifact.url
       });
 
+      const completionMessage = detectCompletion(lastSnapshot);
+      if (completionMessage) {
+        logs.push(`Step ${step}: ${completionMessage}`);
+        markRunSubmitted(applicationRunId, {
+          currentStep: step,
+          currentUrl: lastSnapshot.url,
+          snapshotFilePath: stepSnapshotArtifact.filePath,
+          snapshotUrl: stepSnapshotArtifact.url
+        });
+        return {
+          status: 'applied',
+          message: completionMessage,
+          logs,
+          finalUrl: lastSnapshot.url,
+          steps: step,
+          artifacts,
+          applicationSnapshot: buildApplicationSnapshotFromOption(job, activeResumeOption, {
+            coverLetterText: lastCoverLetterText,
+            coverLetterUsed: coverLetterDocumentUploaded,
+            coverLetterDocument: lastCoverLetterDocument
+          })
+        };
+      }
+
       if (requireFinalReview && !finalReviewApproved && hasFinalSubmitControl(lastSnapshot)) {
         const reviewMessage =
           'Application is ready for final review before submission.';
@@ -4473,30 +4502,6 @@ export const applyToJob = async (
         return {
           status: 'review_required',
           message: reviewMessage,
-          logs,
-          finalUrl: lastSnapshot.url,
-          steps: step,
-          artifacts,
-          applicationSnapshot: buildApplicationSnapshotFromOption(job, activeResumeOption, {
-            coverLetterText: lastCoverLetterText,
-            coverLetterUsed: coverLetterDocumentUploaded,
-            coverLetterDocument: lastCoverLetterDocument
-          })
-        };
-      }
-
-      const completionMessage = detectCompletion(lastSnapshot);
-      if (completionMessage) {
-        logs.push(`Step ${step}: ${completionMessage}`);
-        markRunSubmitted(applicationRunId, {
-          currentStep: step,
-          currentUrl: lastSnapshot.url,
-          snapshotFilePath: stepSnapshotArtifact.filePath,
-          snapshotUrl: stepSnapshotArtifact.url
-        });
-        return {
-          status: 'applied',
-          message: completionMessage,
           logs,
           finalUrl: lastSnapshot.url,
           steps: step,
