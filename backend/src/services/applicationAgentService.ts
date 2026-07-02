@@ -227,7 +227,7 @@ export const applyToJob = async (
   const adapter = getApplicationAdapterForPlatform(platform);
   const requireFinalReview =
     process.env.APPLY_AGENT_REQUIRE_FINAL_REVIEW === undefined
-      ? true
+      ? false
       : isEnabled(process.env.APPLY_AGENT_REQUIRE_FINAL_REVIEW);
   const allowedPlatforms = getAllowedPlatforms();
   const trackedApplication = createTrackedApplication(

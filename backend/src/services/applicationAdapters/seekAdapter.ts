@@ -124,8 +124,10 @@ const FORCE_CONTINUE_REVIEW_PATTERN =
   /year|experience|prefill|framework|language|selection|cover letter|resume|question|answer|skill|stack|technology/i;
 const COMMON_APPLICATION_PROFILE_REVIEW_PATTERN =
   /work rights|working rights|right to work|authori[sz]ation|sponsorship|driver|licen[cs]e|salary|base salary|compensation|remuneration|notice|availability|transport|vehicle|car access|email|phone|mobile|name|linkedin|github|website|portfolio|location|address|suburb|postcode|about you|summary|profile|skill|technology|tool|employment|work history|previous job|education|qualification|degree|certificate/i;
+const HARD_REVIEW_BLOCKER_PATTERN =
+  /captcha|recaptcha|hcaptcha|mfa|multi[-\s]?factor|one[-\s]?time|otp|verification code|verify your|login|log in|sign in|password|legal declaration|declaration not supported|cannot answer|impossible|blocked/i;
 const FORCE_CONTINUE_INSTRUCTION =
-  'Do not stop for routine employer questions, imperfect prefilled answers, missing exact years, or common screening questions when the applicationProfile provides an explicit answer. Continue by using conservative resume-grounded estimates, applicationProfile answers for contact details, location, links, availability, notice period, profile summary, manual skills, previous jobs, education, work rights, licence, car access, salary, and recurring screening questions, correcting existing selections and text, replacing weak prefilled cover-letter content, and uploading or replacing the resume if the page expects it.';
+  'Do not stop while a safe browser action can still move the application forward. Continue by clicking safe next/continue/apply/submit controls, using conservative resume-grounded estimates, using applicationProfile answers for contact details, location, links, availability, notice period, profile summary, manual skills, previous jobs, education, work rights, licence, car access, salary, and recurring screening questions, correcting existing selections and text, replacing weak prefilled cover-letter content, and uploading or replacing the resume if the page expects it. Request review only for captcha, MFA/login, an unsupported legal declaration, or missing required information that is not in the resume or applicationProfile.';
 const HUMAN_TYPING_DELAY_MS = 35;
 const SEQUENTIAL_TYPE_MAX_CHARS = 220;
 const REDACTED_PASSWORD_VALUE = '__redacted_password_present__';
@@ -2261,20 +2263,41 @@ const resolveSelectOption = (
 const shouldForceContinueAutomation = (
   decision: AgentDecision,
   snapshot: PageSnapshot,
-  applicationProfile?: ApplicationProfile
+  applicationProfile: ApplicationProfile | undefined,
+  requireFinalReview: boolean
 ): boolean => {
   if (decision.action !== 'done' || decision.finalStatus !== 'review_required') {
     return false;
   }
 
-  const hasActionableFormFields = snapshot.elements.some(
-    element =>
-      !element.disabled &&
-      !element.hidden &&
-      (element.editable || element.selectable || element.checkable || element.uploadable)
-  );
+  const hasActionableProgress = snapshot.elements.some(element => {
+    if (element.disabled || element.hidden) {
+      return false;
+    }
 
-  if (!hasActionableFormFields) {
+    if (element.editable || element.selectable || element.checkable || element.uploadable) {
+      return true;
+    }
+
+    if (!element.clickable) {
+      return false;
+    }
+
+    const hints = `${getElementHints(element)} ${element.text || ''}`.trim();
+    if (!hints) {
+      return false;
+    }
+
+    if (FINAL_SUBMIT_PATTERN.test(hints)) {
+      return !requireFinalReview;
+    }
+
+    return /\b(next|continue|proceed|apply|submit|send|finish|done|save|confirm|accept|agree|yes|no|upload|add)\b/i.test(
+      hints
+    );
+  });
+
+  if (!hasActionableProgress) {
     return false;
   }
 
@@ -2284,7 +2307,7 @@ const shouldForceContinueAutomation = (
   }
 
   if (!COMMON_APPLICATION_PROFILE_REVIEW_PATTERN.test(combinedReason)) {
-    return false;
+    return !HARD_REVIEW_BLOCKER_PATTERN.test(combinedReason);
   }
 
   const normalizedReason = combinedReason.toLowerCase();
@@ -2649,9 +2672,11 @@ const planNextAction = async (
             'The cover letter has already been written into coverLetterDocument. Prefer upload_cover_letter when the current page snapshot contains a cover-letter upload target. If upload_cover_letter is unavailable or fails, type coverLetterDocument.content directly into the visible cover-letter or motivation field. ' +
             (requireFinalReview
               ? 'APPLY_AGENT_REQUIRE_FINAL_REVIEW is enabled. Do not click a final submit/send-application control. When the application is complete and ready for final submission, use done with finalStatus=review_required so the user can review and submit or continue. '
-              : '') +
-            'Use done only when the application is submitted or the page clearly shows a confirmation or only non-essential follow-up remains. ' +
-            'Use finalStatus=review_required only for captcha, MFA, legal declarations not supported by the resume, or truly missing personal information that is not already supplied by applicationProfile and cannot be conservatively inferred. ' +
+              : 'APPLY_AGENT_REQUIRE_FINAL_REVIEW is disabled. If the page is ready to submit, click the final submit/send-application control and continue until the page confirms submission. ') +
+            'Do not use done with finalStatus=review_required when there is a visible safe action that can continue the application, such as answering a field, correcting validation, uploading a document, or clicking next/continue/submit. ' +
+            'Use finalStatus=review_required only when automation cannot continue because of captcha, MFA/login, an unsupported legal declaration, or truly missing required information that is not in applicationProfile or the active resume and cannot be conservatively inferred. ' +
+            'Use done with finalStatus=applied when the application is submitted, the page clearly shows a confirmation, or only non-essential follow-up remains. ' +
+            (requireFinalReview ? '' : 'Do not stop merely for final user review; this run is allowed to submit. ') +
             'If blocked or impossible, use fail with a concise message.'
         },
         {
@@ -4582,7 +4607,14 @@ export const applyToJob = async (
             attemptFeedback
           );
 
-          if (shouldForceContinueAutomation(decision, workingSnapshot, applicationProfile)) {
+          if (
+            shouldForceContinueAutomation(
+              decision,
+              workingSnapshot,
+              applicationProfile,
+              requireFinalReview
+            )
+          ) {
             logs.push(
               `${attemptLabel}: continuing instead of review - ${decision.message || decision.reasoning.slice(0, 180)}`
             );
@@ -4676,7 +4708,10 @@ export const applyToJob = async (
               `step-${step}-attempt-${attempt}-done`
             );
 
-            if ((decision.finalStatus || 'review_required') === 'review_required') {
+            const resolvedFinalStatus =
+              decision.finalStatus || (requireFinalReview ? 'review_required' : 'applied');
+
+            if (resolvedFinalStatus === 'review_required') {
               const reviewMessage = decision.message || 'Application flow requires user review.';
               const reviewDiagnostics = await saveRunDiagnostics({
                 applicationRunId,

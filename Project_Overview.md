@@ -22,6 +22,7 @@
 - The Progress page now includes an application run status summary and `ApplicationRunViewer` in the details modal for current/past browser attempts, screenshots, failures, and intervention state.
 - Application platform detection lives in `backend/src/services/applicationPlatformService.ts`. It detects seek, indeed, greenhouse, lever, workday, smartrecruiters, bamboohr, ashby, pageup, successfactors, taleo, and falls back to `generic`.
 - `applicationAgentService.ts` is the apply orchestrator. It creates tracked applications/runs, detects platform, enforces `APPLY_AGENT_ALLOWED_PLATFORMS`, selects the adapter, passes `APPLY_AGENT_REQUIRE_FINAL_REVIEW`, maps adapter statuses back to frontend-compatible results, and finalizes tracking.
+- Auto-apply now defaults `APPLY_AGENT_REQUIRE_FINAL_REVIEW` to false when unset. The SEEK LLM should only create `review_required` handoffs when automation cannot continue, such as captcha, MFA/login, unsupported legal declarations, or missing required information.
 - Application adapter contracts live in `backend/src/services/applicationAdapters/types.ts`. The registry in `applicationAdapters/adapterRegistry.ts` currently registers `seek` and `generic`; unsupported known ATS platforms route to `generic` until dedicated adapters are added.
 
 ---
