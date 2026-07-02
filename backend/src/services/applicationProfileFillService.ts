@@ -6,6 +6,7 @@ import {
   WorkRightsStatus
 } from '../models/ApplicationProfile';
 import { Resume } from '../models/Resume';
+import { AiModel } from '../models/AiSettings';
 
 const PROFILE_FILL_MODEL = process.env.PROFILE_FILL_MODEL || 'gpt-5.4-mini';
 const MAX_RESUMES = Number(process.env.PROFILE_FILL_MAX_RESUMES || 8);
@@ -106,7 +107,8 @@ export interface ProfileFillResult {
 
 export const fillApplicationProfileFromResumes = async (
   resumes: Resume[],
-  currentProfile: ApplicationProfile
+  currentProfile: ApplicationProfile,
+  aiModel?: AiModel
 ): Promise<ProfileFillResult> => {
   const resumePayload = buildResumePayload(resumes);
   if (resumePayload.length === 0) {
@@ -115,7 +117,7 @@ export const fillApplicationProfileFromResumes = async (
 
   const openai = getOpenAIClient();
   const response = await openai.chat.completions.create({
-    model: PROFILE_FILL_MODEL,
+    model: aiModel || PROFILE_FILL_MODEL,
     response_format: { type: 'json_object' },
     temperature: 0.1,
     messages: [

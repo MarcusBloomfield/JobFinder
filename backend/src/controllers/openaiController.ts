@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import * as llmSandboxService from '../services/llmSandboxService';
 import { Resume } from '../models/Resume';
 import { Job } from '../models/Job';
+import { normalizeAiModel } from '../models/AiSettings';
 
 const MAX_BULK_CONCURRENCY = 3;
 const MAX_RETRIES_PER_JOB = 2;
@@ -62,11 +63,12 @@ const fallbackMatchScore = (job: Job, resume: Resume): number => {
 
 const evaluateJobWithRetries = async (
   job: Job,
-  resume: Resume
+  resume: Resume,
+  aiModel?: string
 ): Promise<{ id: string; matchScore: number; error?: string }> => {
   for (let attempt = 0; attempt <= MAX_RETRIES_PER_JOB; attempt += 1) {
     try {
-      const score = await llmSandboxService.evaluateJobMatch(job, resume);
+      const score = await llmSandboxService.evaluateJobMatch(job, resume, normalizeAiModel(aiModel));
       const normalizedScore = clampScore(score);
       console.log(`OK evaluated "${job.title}": ${normalizedScore}%`);
       return { id: job.id, matchScore: normalizedScore };
@@ -104,7 +106,7 @@ const evaluateJobWithRetries = async (
  */
 export const generateSearchTerms = async (req: Request, res: Response) => {
   try {
-    const { resume } = req.body;
+    const { resume, aiModel } = req.body;
 
     if (!resume) {
       return res.status(400).json({
@@ -120,7 +122,7 @@ export const generateSearchTerms = async (req: Request, res: Response) => {
       });
     }
 
-    const searchTerms = await llmSandboxService.generateSearchTerms(resume);
+    const searchTerms = await llmSandboxService.generateSearchTerms(resume, normalizeAiModel(aiModel));
 
     res.status(200).json({
       error: false,
@@ -142,7 +144,7 @@ export const generateSearchTerms = async (req: Request, res: Response) => {
  */
 export const evaluateJobMatch = async (req: Request, res: Response) => {
   try {
-    const { job, resume } = req.body;
+    const { job, resume, aiModel } = req.body;
 
     if (!job || !resume) {
       return res.status(400).json({
@@ -165,7 +167,7 @@ export const evaluateJobMatch = async (req: Request, res: Response) => {
       });
     }
 
-    const matchScore = await llmSandboxService.evaluateJobMatch(job, resume);
+    const matchScore = await llmSandboxService.evaluateJobMatch(job, resume, normalizeAiModel(aiModel));
 
     res.status(200).json({
       error: false,
@@ -190,7 +192,7 @@ export const evaluateJobMatch = async (req: Request, res: Response) => {
  */
 export const evaluateJobMatchesBulk = async (req: Request, res: Response) => {
   try {
-    const { jobs, resume } = req.body;
+    const { jobs, resume, aiModel } = req.body;
 
     if (!jobs || !Array.isArray(jobs) || !resume) {
       return res.status(400).json({
@@ -220,7 +222,7 @@ export const evaluateJobMatchesBulk = async (req: Request, res: Response) => {
     for (let i = 0; i < jobs.length; i += MAX_BULK_CONCURRENCY) {
       const batch = jobs.slice(i, i + MAX_BULK_CONCURRENCY);
       console.log(`Evaluating batch ${Math.floor(i / MAX_BULK_CONCURRENCY) + 1} with ${batch.length} jobs`);
-      const batchResults = await Promise.all(batch.map(job => evaluateJobWithRetries(job, resume)));
+      const batchResults = await Promise.all(batch.map(job => evaluateJobWithRetries(job, resume, aiModel)));
       results.push(...batchResults);
     }
 

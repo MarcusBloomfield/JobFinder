@@ -11,6 +11,7 @@ import * as applicationAgentService from '../services/applicationAgentService';
 import * as applicationProfileFillService from '../services/applicationProfileFillService';
 import { checkAutoApplyDistance } from '../services/jobDistanceService';
 import { ApplicationTriggerSource } from '../services/applicationTrackingService';
+import { isAiModel } from '../models/AiSettings';
 
 const validateJob = (job: any): job is Job => {
   return (
@@ -90,7 +91,7 @@ const validateApplicationProfile = (profile: any): profile is ApplicationProfile
 
 export const applyToJob = async (req: Request, res: Response) => {
   try {
-    const { job, resume, applicationProfile, triggerSource } = req.body;
+    const { job, resume, applicationProfile, triggerSource, aiModel } = req.body;
 
     if (!job || !resume) {
       return res.status(400).json({
@@ -151,7 +152,8 @@ export const applyToJob = async (req: Request, res: Response) => {
       job,
       resume,
       applicationProfile,
-      triggerSource || 'manual'
+      triggerSource || 'manual',
+      isAiModel(aiModel) ? aiModel : undefined
     );
 
     res.status(200).json({
@@ -189,7 +191,7 @@ export const openSeekLoginBrowser = async (_req: Request, res: Response) => {
 
 export const fillApplicationProfile = async (req: Request, res: Response) => {
   try {
-    const { resumes, applicationProfile } = req.body;
+    const { resumes, applicationProfile, aiModel } = req.body;
 
     if (!Array.isArray(resumes) || resumes.length === 0) {
       return res.status(400).json({
@@ -215,7 +217,8 @@ export const fillApplicationProfile = async (req: Request, res: Response) => {
 
     const result = await applicationProfileFillService.fillApplicationProfileFromResumes(
       resumes,
-      applicationProfile
+      applicationProfile,
+      isAiModel(aiModel) ? aiModel : undefined
     );
 
     res.status(200).json({

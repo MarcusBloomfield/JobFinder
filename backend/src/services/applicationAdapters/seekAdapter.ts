@@ -5,6 +5,7 @@ import { Document, Packer, Paragraph, TextRun } from 'docx';
 import OpenAI from 'openai';
 import { BrowserContext, chromium, Page } from 'playwright';
 import { ApplicationProfile } from '../../models/ApplicationProfile';
+import { AiModel } from '../../models/AiSettings';
 import { Job } from '../../models/Job';
 import { Resume } from '../../models/Resume';
 import { listStoredResumes } from '../resumeParserService';
@@ -876,9 +877,10 @@ const createCoverLetterDocument = async (
   job: Job,
   activeResumeOption: ResumeOption,
   applicationProfile: ApplicationProfile | undefined,
-  runArtifactsDir: string
+  runArtifactsDir: string,
+  aiModel?: AiModel
 ): Promise<CoverLetterDocumentSnapshot> => {
-  const content = await buildCoverLetterDocumentText(job, activeResumeOption, applicationProfile);
+  const content = await buildCoverLetterDocumentText(job, activeResumeOption, applicationProfile, aiModel);
   const createdAt = new Date().toISOString();
   const fileName = `${slugify(job.company)}-${slugify(job.title)}-cover-letter.docx`;
   const filePath = path.join(runArtifactsDir, fileName);
@@ -983,7 +985,8 @@ const buildCoverLetterText = (
 const buildCoverLetterDocumentText = async (
   job: Job,
   activeResumeOption: ResumeOption,
-  applicationProfile?: ApplicationProfile
+  applicationProfile?: ApplicationProfile,
+  aiModel?: AiModel
 ): Promise<string> => {
   const examples = getProfileCoverLetterExamples(applicationProfile);
   if (examples.length === 0) {
@@ -993,7 +996,7 @@ const buildCoverLetterDocumentText = async (
   try {
     const response = await waitWithTimeout(
       getOpenAIClient().chat.completions.create({
-        model: COVER_LETTER_MODEL,
+        model: aiModel || COVER_LETTER_MODEL,
         response_format: { type: 'json_object' },
         temperature: 0.2,
         messages: [
@@ -2594,6 +2597,7 @@ const planNextAction = async (
   coverLetterDocument: CoverLetterDocumentSnapshot,
   requireFinalReview: boolean,
   logs: string[],
+  aiModel?: AiModel,
   extraInstruction?: string,
   attemptFeedback?: string
 ): Promise<AgentDecision> => {
@@ -2605,7 +2609,7 @@ const planNextAction = async (
 
   const response = await waitWithTimeout(
     openai.chat.completions.create({
-      model: APPLY_AGENT_MODEL,
+      model: aiModel || APPLY_AGENT_MODEL,
       reasoning_effort: APPLY_AGENT_REASONING_EFFORT,
       response_format: { type: 'json_object' },
       messages: [
@@ -4269,7 +4273,8 @@ export const applyToJob = async (
   applicationProfile?: ApplicationProfile,
   applicationId?: string,
   applicationRunId?: string,
-  requireFinalReview = false
+  requireFinalReview = false,
+  aiModel?: AiModel
 ): Promise<JobApplicationResult> => {
   const runArtifactsDir = createRunArtifactsDir(job, applicationRunId);
   updateRunProgress(applicationRunId, {
@@ -4300,7 +4305,8 @@ export const applyToJob = async (
     job,
     activeResumeOption,
     applicationProfile,
-    runArtifactsDir
+    runArtifactsDir,
+    aiModel
   );
   const applicationChecklist = createApplicationChecklistRuntime(activeResumeOption);
   await closeSeekLoginSessionIfOpen();
@@ -4571,6 +4577,7 @@ export const applyToJob = async (
             activeCoverLetterDocument,
             requireFinalReview,
             logs,
+            aiModel,
             combinedExtraInstruction || undefined,
             attemptFeedback
           );
@@ -4590,6 +4597,7 @@ export const applyToJob = async (
               activeCoverLetterDocument,
               requireFinalReview,
               logs,
+              aiModel,
               [humanContinuationInstruction, stepExtraInstruction].filter(Boolean).join(' ') || undefined,
               attemptFeedback
             );
@@ -4610,6 +4618,7 @@ export const applyToJob = async (
               activeCoverLetterDocument,
               requireFinalReview,
               logs,
+              aiModel,
               [humanContinuationInstruction, stepExtraInstruction].filter(Boolean).join(' ') || undefined,
               attemptFeedback
             );
@@ -4847,7 +4856,8 @@ export const applyToJob = async (
               job,
               activeResumeOption,
               applicationProfile,
-              runArtifactsDir
+              runArtifactsDir,
+              aiModel
             );
             lastCoverLetterText = activeCoverLetterDocument.content;
             lastCoverLetterDocument = activeCoverLetterDocument;
@@ -5292,7 +5302,8 @@ export const seekAdapter: ApplicationAdapter = {
         context.applicationProfile,
         context.applicationId,
         context.applicationRunId,
-        Boolean(context.requireFinalReview)
+        Boolean(context.requireFinalReview),
+        context.metadata?.aiModel as AiModel | undefined
       )
     )
 };

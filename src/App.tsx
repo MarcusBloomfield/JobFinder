@@ -3,6 +3,7 @@ import ResumeUploader from './components/ResumeUploader';
 import CoverLetterExampleUploader from './components/CoverLetterExampleUploader';
 import ApplicationProfilePanel from './components/ApplicationProfilePanel';
 import ApplicationProgressPanel from './components/ApplicationProgressPanel';
+import SettingsPanel from './components/SettingsPanel';
 import HumanInterventionPanel from './components/HumanInterventionPanel';
 import SearchTerms from './components/SearchTerms';
 import LocationSelector from './components/LocationSelector';
@@ -11,7 +12,7 @@ import JobList from './components/JobList';
 import useJobSearch from './hooks/useJobSearch';
 import './styles/App.css';
 
-type AppPage = 'search' | 'profile' | 'progress';
+type AppPage = 'search' | 'profile' | 'progress' | 'settings';
 
 const getPageFromHash = (): AppPage => {
     if (typeof window === 'undefined') {
@@ -24,6 +25,10 @@ const getPageFromHash = (): AppPage => {
 
     if (window.location.hash === '#/progress') {
         return 'progress';
+    }
+
+    if (window.location.hash === '#/settings') {
+        return 'settings';
     }
 
     return 'search';
@@ -47,6 +52,7 @@ const App: React.FC = () => {
             isSeekLoginLoading,
             isStoredResumesLoading,
             applicationProfile,
+            aiSettings,
             applicationTrackingSummary,
             applicationHistory,
             isApplicationTrackingLoading,
@@ -67,6 +73,7 @@ const App: React.FC = () => {
             setLocation,
             setJobSearchAmount,
             updateApplicationProfile,
+            updateAiSettings,
             uploadCoverLetterExample,
             removeCoverLetterExample,
             fillApplicationProfileFromResumes,
@@ -87,7 +94,14 @@ const App: React.FC = () => {
     }, []);
 
     const navigateToPage = (page: AppPage): void => {
-        const nextHash = page === 'profile' ? '#/profile' : page === 'progress' ? '#/progress' : '#/';
+        const nextHash =
+            page === 'profile'
+                ? '#/profile'
+                : page === 'progress'
+                ? '#/progress'
+                : page === 'settings'
+                ? '#/settings'
+                : '#/';
         if (window.location.hash !== nextHash) {
             window.location.hash = nextHash;
             return;
@@ -122,13 +136,21 @@ const App: React.FC = () => {
                     >
                         Progress
                     </button>
+                    <button
+                        className={`app-nav-button ${currentPage === 'settings' ? 'active' : ''}`}
+                        onClick={() => navigateToPage('settings')}
+                    >
+                        Settings
+                    </button>
                 </nav>
             </header>
             <main className="app-main">
                 {error && <div className="error-banner">{error}</div>}
                 <HumanInterventionPanel onResolved={refreshApplicationTracking} />
 
-                {currentPage === 'progress' ? (
+                {currentPage === 'settings' ? (
+                    <SettingsPanel settings={aiSettings} onChange={updateAiSettings} />
+                ) : currentPage === 'progress' ? (
                     <ApplicationProgressPanel
                         summary={applicationTrackingSummary}
                         history={applicationHistory}

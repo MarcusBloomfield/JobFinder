@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { Resume } from '../models/Resume';
 import { Job } from '../models/Job';
+import { AiModel, DEFAULT_AI_MODEL } from '../models/AiSettings';
 import dotenv from 'dotenv';
 
 // Load environment variables
@@ -37,7 +38,10 @@ const getOpenAIClient = (): OpenAI => {
 /**
  * Generate job search terms from resume content
  */
-export const generateSearchTerms = async (resume: Resume): Promise<string[]> => {
+export const generateSearchTerms = async (
+  resume: Resume,
+  aiModel: AiModel = DEFAULT_AI_MODEL
+): Promise<string[]> => {
   const openai = getOpenAIClient();
   
   console.log('Generating search terms for resume...');
@@ -77,7 +81,7 @@ Based ONLY on the resume content provided above:
   
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-5.4-mini',
+      model: aiModel,
       messages: messages,
       temperature: 0.1, // Further reduced temperature for precision
       response_format: { type: 'json_object' }
@@ -133,14 +137,18 @@ Based ONLY on the resume content provided above:
 /**
  * Evaluate job match quality against resume
  */
-export const evaluateJobMatch = async (job: Job, resume: Resume): Promise<number> => {
+export const evaluateJobMatch = async (
+  job: Job,
+  resume: Resume,
+  aiModel: AiModel = DEFAULT_AI_MODEL
+): Promise<number> => {
   const openai = getOpenAIClient();
 
   console.log('Evaluating job match:', job.title);
   
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-5.4-mini',
+      model: aiModel,
       messages: [
         {
           role: 'system',

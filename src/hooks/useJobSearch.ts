@@ -7,6 +7,7 @@ import {
   DEFAULT_APPLICATION_PROFILE,
   normalizeApplicationProfile
 } from '../models/ApplicationProfile';
+import { AiSettings, DEFAULT_AI_SETTINGS, normalizeAiSettings } from '../models/AiSettings';
 import {
   ApplicationProgressStage,
   ApplicationTrackingSummary,
@@ -48,6 +49,7 @@ interface JobSearchState {
   applicationTrackingSummary: ApplicationTrackingSummary | null;
   applicationHistory: TrackedJobApplication[];
   isApplicationTrackingLoading: boolean;
+  aiSettings: AiSettings;
   isProfileFillLoading: boolean;
   isCoverLetterExampleLoading: boolean;
   coverLetterExampleMessage: string | null;
@@ -66,6 +68,7 @@ interface JobSearchActions {
   setLocation: (location: string) => void;
   setJobSearchAmount: (amount: number) => void;
   updateApplicationProfile: (updates: Partial<ApplicationProfile>) => void;
+  updateAiSettings: (updates: Partial<AiSettings>) => void;
   uploadCoverLetterExample: (file: File) => Promise<void>;
   removeCoverLetterExample: (exampleId: string) => void;
   fillApplicationProfileFromResumes: () => Promise<void>;
@@ -88,6 +91,7 @@ const getPageLimitForMaxJobs = (maxJobs: number): number => {
 };
 
 const APPLICATION_PROFILE_STORAGE_KEY = 'jobfinder.applicationProfile';
+const AI_SETTINGS_STORAGE_KEY = 'jobfinder.aiSettings';
 
 const loadStoredApplicationProfile = (): ApplicationProfile => {
   if (typeof window === 'undefined') {
@@ -99,6 +103,19 @@ const loadStoredApplicationProfile = (): ApplicationProfile => {
     return raw ? normalizeApplicationProfile(JSON.parse(raw)) : { ...DEFAULT_APPLICATION_PROFILE };
   } catch {
     return { ...DEFAULT_APPLICATION_PROFILE };
+  }
+};
+
+const loadStoredAiSettings = (): AiSettings => {
+  if (typeof window === 'undefined') {
+    return { ...DEFAULT_AI_SETTINGS };
+  }
+
+  try {
+    const raw = window.localStorage.getItem(AI_SETTINGS_STORAGE_KEY);
+    return raw ? normalizeAiSettings(JSON.parse(raw)) : { ...DEFAULT_AI_SETTINGS };
+  } catch {
+    return { ...DEFAULT_AI_SETTINGS };
   }
 };
 
@@ -159,6 +176,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   const [applicationTrackingSummary, setApplicationTrackingSummary] =
     useState<ApplicationTrackingSummary | null>(null);
   const [applicationHistory, setApplicationHistory] = useState<TrackedJobApplication[]>([]);
+  const [aiSettings, setAiSettings] = useState<AiSettings>(() => loadStoredAiSettings());
   const [isApplicationTrackingLoading, setIsApplicationTrackingLoading] = useState<boolean>(false);
   const [isProfileFillLoading, setIsProfileFillLoading] = useState<boolean>(false);
   const [isCoverLetterExampleLoading, setIsCoverLetterExampleLoading] = useState<boolean>(false);
@@ -188,7 +206,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     }
 
     try {
-      const terms = await generateSearchTerms(nextResume);
+      const terms = await generateSearchTerms(nextResume, aiSettings.model);
       const hydratedResume = { ...nextResume, generatedSearchTerms: terms };
       setResume(hydratedResume);
       setSearchTerms(terms);
@@ -277,6 +295,14 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     );
   }, [applicationProfile]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(normalizeAiSettings(aiSettings)));
+  }, [aiSettings]);
+
   const uploadResume = async (file: File): Promise<void> => {
     setIsLoading(true);
     setError(null);
@@ -336,7 +362,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
         console.log(`Evaluating match scores for ${scrapedJobs.length} jobs in bulk`);
         
         // Use the bulk evaluation service to process all jobs at once
-        const matchScores = await evaluateJobMatchesBulk(scrapedJobs, resume);
+        const matchScores = await evaluateJobMatchesBulk(scrapedJobs, resume, aiSettings.model);
         
         // Apply match scores to the jobs
         const jobsWithScores = scrapedJobs.map(job => ({
@@ -400,7 +426,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
 
     setIsLoading(true);
     try {
-      const matchScore = await evaluateJobMatch(job, resume);
+      const matchScore = await evaluateJobMatch(job, resume, aiSettings.model);
       
       // Update the job with the match score
       setJobs(jobs.map(j => 
@@ -458,7 +484,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     );
 
     try {
-      const result = await autoApplyToJob(job, activeResume, applicationProfile, triggerSource);
+      const result = await autoApplyToJob(job, activeResume, applicationProfile, triggerSource, aiSettings.model);
       const updatedAt = new Date().toISOString();
 
       setJobs(currentJobs =>
@@ -657,6 +683,15 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     setProfileFillMessage(null);
   };
 
+  const updateAiSettings = (updates: Partial<AiSettings>): void => {
+    setAiSettings(currentSettings =>
+      normalizeAiSettings({
+        ...currentSettings,
+        ...updates
+      })
+    );
+  };
+
   const fillApplicationProfileFromResumes = async (): Promise<void> => {
     const resumesWithContent = storedResumes.filter(storedResume => storedResume.content.trim());
 
@@ -671,7 +706,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     setProfileFillMessage(null);
 
     try {
-      const result = await fillApplicationProfileWithAi(resumesWithContent, applicationProfile);
+      const result = await fillApplicationProfileWithAi(resumesWithContent, applicationProfile, aiSettings.model);
       setApplicationProfile(normalizeApplicationProfile(result.profile));
       setProfileFillMessage(
         result.updatedFields.length > 0
@@ -780,6 +815,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       applicationTrackingSummary,
       applicationHistory,
       isApplicationTrackingLoading,
+      aiSettings,
       isProfileFillLoading,
       isCoverLetterExampleLoading,
       coverLetterExampleMessage,
@@ -797,6 +833,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       setLocation: updateLocation,
       setJobSearchAmount,
       updateApplicationProfile,
+      updateAiSettings,
       uploadCoverLetterExample,
       removeCoverLetterExample,
       fillApplicationProfileFromResumes,

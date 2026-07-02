@@ -1,5 +1,6 @@
 import { Resume } from '../models/Resume';
 import { Job } from '../models/Job';
+import { AiModel } from '../models/AiSettings';
 import * as openaiService from './openaiService';
 
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 20000);
@@ -99,19 +100,19 @@ const validateScore = (score: number): number => {
   return Math.max(0, Math.min(100, Math.round(score)));
 };
 
-export const generateSearchTerms = async (resume: Resume): Promise<string[]> => {
+export const generateSearchTerms = async (resume: Resume, aiModel?: AiModel): Promise<string[]> => {
   const safeResume = sanitizeResume(resume);
   const terms = await runThrottled(() =>
-    withTimeout(openaiService.generateSearchTerms(safeResume), LLM_TIMEOUT_MS)
+    withTimeout(openaiService.generateSearchTerms(safeResume, aiModel), LLM_TIMEOUT_MS)
   );
   return validateSearchTerms(terms);
 };
 
-export const evaluateJobMatch = async (job: Job, resume: Resume): Promise<number> => {
+export const evaluateJobMatch = async (job: Job, resume: Resume, aiModel?: AiModel): Promise<number> => {
   const safeJob = sanitizeJob(job);
   const safeResume = sanitizeResume(resume);
   const score = await runThrottled(() =>
-    withTimeout(openaiService.evaluateJobMatch(safeJob, safeResume), LLM_TIMEOUT_MS)
+    withTimeout(openaiService.evaluateJobMatch(safeJob, safeResume, aiModel), LLM_TIMEOUT_MS)
   );
   return validateScore(score);
 };

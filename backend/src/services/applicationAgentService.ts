@@ -1,4 +1,5 @@
 import { ApplicationProfile } from '../models/ApplicationProfile';
+import { AiModel } from '../models/AiSettings';
 import { Job } from '../models/Job';
 import { Resume } from '../models/Resume';
 import {
@@ -219,7 +220,8 @@ export const applyToJob = async (
   job: Job,
   resume: Resume,
   applicationProfile?: ApplicationProfile,
-  triggerSource: ApplicationTriggerSource = 'manual'
+  triggerSource: ApplicationTriggerSource = 'manual',
+  aiModel?: AiModel
 ): Promise<JobApplicationResult> => {
   const platform = detectPlatform(job.url);
   const adapter = getApplicationAdapterForPlatform(platform);
@@ -246,7 +248,8 @@ export const applyToJob = async (
       adapter: adapter.id,
       adapterName: adapter.displayName,
       requireFinalReview,
-      allowedPlatforms: allowedPlatforms ? Array.from(allowedPlatforms) : 'all'
+      allowedPlatforms: allowedPlatforms ? Array.from(allowedPlatforms) : 'all',
+      aiModel
     }
   });
 
@@ -273,7 +276,8 @@ export const applyToJob = async (
             requireFinalReview,
             metadata: {
               triggerSource,
-              requireFinalReview
+              requireFinalReview,
+              aiModel
             }
           });
 

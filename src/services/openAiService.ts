@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { Resume } from '../models/Resume';
 import { Job } from '../models/Job';
+import { AiModel } from '../models/AiSettings';
 
 // API endpoint
 const API_URL = 'http://localhost:5000/api';
@@ -8,12 +9,12 @@ const API_URL = 'http://localhost:5000/api';
 /**
  * Generate job search terms from resume content
  */
-export const generateSearchTerms = async (resume: Resume): Promise<string[]> => {
+export const generateSearchTerms = async (resume: Resume, aiModel?: AiModel): Promise<string[]> => {
   console.log('Generating search terms from resume');
   
   try {
     // Call backend API
-    const response = await axios.post(`${API_URL}/openai/generate-search-terms`, { resume });
+    const response = await axios.post(`${API_URL}/openai/generate-search-terms`, { resume, aiModel });
     
     if (response.data && response.data.data) {
       return response.data.data;
@@ -31,12 +32,12 @@ export const generateSearchTerms = async (resume: Resume): Promise<string[]> => 
 /**
  * Evaluate job match quality against resume
  */
-export const evaluateJobMatch = async (job: Job, resume: Resume): Promise<number> => {
+export const evaluateJobMatch = async (job: Job, resume: Resume, aiModel?: AiModel): Promise<number> => {
   console.log('Evaluating job match:', job.title);
   
   try {
     // Call backend API
-    const response = await axios.post(`${API_URL}/openai/evaluate-job-match`, { job, resume });
+    const response = await axios.post(`${API_URL}/openai/evaluate-job-match`, { job, resume, aiModel });
     
     if (response.data && response.data.data && typeof response.data.data.matchScore === 'number') {
       return response.data.data.matchScore;
@@ -138,12 +139,16 @@ const mockEvaluateJobMatch = async (job: Job, resume: Resume): Promise<number> =
 /**
  * Evaluate multiple job matches in bulk
  */
-export const evaluateJobMatchesBulk = async (jobs: Job[], resume: Resume): Promise<Record<string, number>> => {
+export const evaluateJobMatchesBulk = async (
+  jobs: Job[],
+  resume: Resume,
+  aiModel?: AiModel
+): Promise<Record<string, number>> => {
   console.log(`Evaluating ${jobs.length} jobs in bulk`);
   
   try {
     // Call backend API
-    const response = await axios.post(`${API_URL}/openai/evaluate-job-matches-bulk`, { jobs, resume });
+    const response = await axios.post(`${API_URL}/openai/evaluate-job-matches-bulk`, { jobs, resume, aiModel });
     
     if (response.data && response.data.data && Array.isArray(response.data.data)) {
       // Convert array of results to a map of jobId -> matchScore
@@ -183,4 +188,4 @@ export const evaluateJobMatchesBulk = async (jobs: Job[], resume: Resume): Promi
     
     return resultsMap;
   }
-}; 
+};

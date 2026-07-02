@@ -3,6 +3,7 @@ import { Job } from '../models/Job';
 import { JobDetails } from '../models/JobDetails';
 import { Resume } from '../models/Resume';
 import { ApplicationProfile } from '../models/ApplicationProfile';
+import { AiModel } from '../models/AiSettings';
 import {
   ApplicationProgressStage,
   ApplicationTrackingSummary,
@@ -44,13 +45,15 @@ export const applyToJob = async (
   job: Job,
   resume: Resume,
   applicationProfile: ApplicationProfile,
-  triggerSource: ApplicationTriggerSource = 'manual'
+  triggerSource: ApplicationTriggerSource = 'manual',
+  aiModel?: AiModel
 ): Promise<JobApplicationResult> => {
   const response = await axios.post(`${API_URL}/apply/job`, {
     job,
     resume,
     applicationProfile,
-    triggerSource
+    triggerSource,
+    aiModel
   });
 
   if (response.data && response.data.data) {
@@ -72,11 +75,13 @@ export const openSeekLoginBrowser = async (): Promise<SeekLoginResult> => {
 
 export const fillApplicationProfileWithAi = async (
   resumes: Resume[],
-  applicationProfile: ApplicationProfile
+  applicationProfile: ApplicationProfile,
+  aiModel?: AiModel
 ): Promise<ApplicationProfileFillResult> => {
   const response = await axios.post(`${API_URL}/apply/profile/fill`, {
     resumes,
-    applicationProfile
+    applicationProfile,
+    aiModel
   });
 
   if (response.data && response.data.data) {
