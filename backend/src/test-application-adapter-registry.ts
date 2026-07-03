@@ -35,6 +35,27 @@ if (!registeredIndeedAdapter || registeredIndeedAdapter.platform !== 'indeed') {
   failures.push('registered adapters: expected indeed adapter registration');
 }
 
+const linkedInUrlAdapter = getApplicationAdapterForUrl('https://www.linkedin.com/jobs/view/123');
+if (linkedInUrlAdapter.id !== 'linkedin') {
+  failures.push(`LinkedIn URL: expected linkedin, got ${linkedInUrlAdapter.id}`);
+}
+const linkedInGuestUrlAdapter = getApplicationAdapterForUrl(
+  'https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/123'
+);
+if (linkedInGuestUrlAdapter.id !== 'linkedin') {
+  failures.push(`LinkedIn guest URL: expected linkedin, got ${linkedInGuestUrlAdapter.id}`);
+}
+if (linkedInUrlAdapter.canAutoSubmit) {
+  failures.push('linkedin adapter: expected canAutoSubmit=false for final-review handoff');
+}
+
+const registeredLinkedInAdapter = getRegisteredApplicationAdapters().find(
+  adapter => adapter.id === 'linkedin'
+);
+if (!registeredLinkedInAdapter || registeredLinkedInAdapter.platform !== 'linkedin') {
+  failures.push('registered adapters: expected LinkedIn adapter registration');
+}
+
 const employmentHeroUrlAdapter = getApplicationAdapterForUrl('https://jobs.swagapp.com/jobs/123');
 if (employmentHeroUrlAdapter.id !== 'employmenthero') {
   failures.push(`Employment Hero URL: expected employmenthero, got ${employmentHeroUrlAdapter.id}`);
