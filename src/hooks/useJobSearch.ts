@@ -61,6 +61,7 @@ interface JobSearchState {
 interface JobSearchActions {
   uploadResume: (file: File) => Promise<void>;
   selectStoredResume: (resumeId: string) => Promise<void>;
+  addCustomApplicationJob: (input: CustomApplicationJobInput) => Promise<void>;
   searchJobs: (customTerms?: string[]) => Promise<void>;
   searchJobsNoAI: (customTerms?: string[]) => Promise<void>;
   evaluateMatch: (jobId: string) => Promise<void>;
@@ -89,6 +90,14 @@ interface ApplyRunOutcome {
   stopReason?: string;
 }
 
+export interface CustomApplicationJobInput {
+  url: string;
+  company: string;
+  title: string;
+  location: string;
+  description?: string;
+}
+
 const getPageLimitForMaxJobs = (maxJobs: number): number => {
   return Math.max(1, Math.min(10, Math.ceil(maxJobs / 20)));
 };
@@ -106,6 +115,56 @@ const normalizeAutoApplyMatchThreshold = (value: unknown): number => {
   }
 
   return Math.max(0, Math.min(100, Math.round(numericValue)));
+};
+
+const normalizeManualApplicationUrl = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error('Enter an application URL.');
+  }
+
+  const candidate = /^[a-z][a-z\d+\-.]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('Use an http or https URL.');
+    }
+
+    parsed.hash = '';
+    parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+    return parsed.toString();
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Use an http or https URL.') {
+      throw error;
+    }
+
+    throw new Error('Enter a valid application URL.');
+  }
+};
+
+const buildStableCustomJobId = (normalizedUrl: string): string => {
+  let hash = 0;
+  for (let index = 0; index < normalizedUrl.length; index += 1) {
+    hash = (hash * 31 + normalizedUrl.charCodeAt(index)) | 0;
+  }
+
+  return `custom-${Math.abs(hash).toString(36)}`;
+};
+
+const buildCustomJobDescription = (
+  input: CustomApplicationJobInput,
+  normalizedUrl: string
+): string => {
+  const description = input.description?.trim();
+  const fallbackDetails = [
+    `Title: ${input.title.trim()}`,
+    `Company: ${input.company.trim()}`,
+    `Location: ${input.location.trim()}`,
+    `Application URL: ${normalizedUrl}`
+  ];
+
+  return description ? `${description}\n\n${fallbackDetails.join('\n')}` : fallbackDetails.join('\n');
 };
 
 const loadStoredApplicationProfile = (): ApplicationProfile => {
@@ -378,6 +437,74 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       setIsLoading(false);
       console.error('Stored resume selection error:', error);
     }
+  };
+
+  const addCustomApplicationJob = async (input: CustomApplicationJobInput): Promise<void> => {
+    const normalizedUrl = normalizeManualApplicationUrl(input.url);
+    const company = input.company.trim();
+    const title = input.title.trim();
+    const location = input.location.trim();
+
+    if (!company) {
+      throw new Error('Enter the company.');
+    }
+
+    if (!title) {
+      throw new Error('Enter the job title.');
+    }
+
+    if (!location) {
+      throw new Error('Enter the location.');
+    }
+
+    if (!resume) {
+      throw new Error('Upload or select a resume first.');
+    }
+
+    const customJob: Job = {
+      id: buildStableCustomJobId(normalizedUrl),
+      title,
+      company,
+      location,
+      description: buildCustomJobDescription(input, normalizedUrl),
+      url: normalizedUrl,
+      datePosted: 'Manual',
+      applicationStatus: 'idle'
+    };
+    const normalizedCustomUrl = normalizeTrackedJobUrl(normalizedUrl);
+
+    setError(null);
+    setJobs(currentJobs => [
+      customJob,
+      ...currentJobs.filter(job => normalizeTrackedJobUrl(job.url) !== normalizedCustomUrl)
+    ]);
+
+    let matchScore: number | undefined;
+    try {
+      matchScore = await evaluateJobMatch(customJob, resume, aiSettings.model);
+    } catch (error) {
+      console.error('Custom job match evaluation error:', error);
+    }
+
+    let hydratedJob: Job = {
+      ...customJob,
+      matchScore
+    };
+
+    try {
+      const trackedApplicationsByUrl = await fetchApplicationStatusesForJobs([normalizedUrl]);
+      hydratedJob = mergeTrackedApplicationIntoJob(
+        hydratedJob,
+        trackedApplicationsByUrl.get(normalizedCustomUrl)
+      );
+    } catch (error) {
+      console.error('Custom job tracking lookup error:', error);
+    }
+
+    setJobs(currentJobs => [
+      hydratedJob,
+      ...currentJobs.filter(job => normalizeTrackedJobUrl(job.url) !== normalizedCustomUrl)
+    ]);
   };
 
   const searchJobs = async (customTerms?: string[]): Promise<void> => {
@@ -890,6 +1017,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     {
       uploadResume,
       selectStoredResume,
+      addCustomApplicationJob,
       searchJobs,
       searchJobsNoAI,
       evaluateMatch,

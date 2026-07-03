@@ -8,6 +8,7 @@ import HumanInterventionPanel from './components/HumanInterventionPanel';
 import SearchTerms from './components/SearchTerms';
 import LocationSelector from './components/LocationSelector';
 import JobSearchAmountSelector from './components/JobSearchAmountSelector';
+import CustomApplicationForm from './components/CustomApplicationForm';
 import JobList from './components/JobList';
 import useJobSearch from './hooks/useJobSearch';
 import type { LoginPlatform } from './services/applicationService';
@@ -72,6 +73,7 @@ const App: React.FC = () => {
         {
             uploadResume,
             selectStoredResume,
+            addCustomApplicationJob,
             searchJobs,
             searchJobsNoAI,
             evaluateMatch,
@@ -278,6 +280,10 @@ const App: React.FC = () => {
                                 </div>
 
                                 <div className="results-section">
+                                    <CustomApplicationForm
+                                        onAddJob={addCustomApplicationJob}
+                                        isDisabled={isLoading || isBulkAutoApplying}
+                                    />
                                     <JobList
                                         jobs={jobs}
                                         evaluateMatch={evaluateMatch}

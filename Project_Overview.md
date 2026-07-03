@@ -31,6 +31,7 @@
 - Employment Hero search saves the rendered job-board HTML to `backend/.playwright/job-search-html/employmenthero-latest.html` plus timestamped snapshots, and its extractor handles current `data-wp-context` job data plus `jobs.employmenthero.com`/Swag job links.
 - Seek and LinkedIn each have search URL construction covered by `backend npm run test:job-search-sites`; LinkedIn pagination uses site-specific next controls.
 - The Resume section has login buttons for Seek, LinkedIn, and Employment Hero. `/api/apply/login/:platform` opens a Playwright-controlled persistent profile for each platform.
+- The Find Jobs results section has a compact custom application URL form (`src/components/CustomApplicationForm.tsx`). It validates/normalizes manual application URLs, creates a stable local `Job` card with user-entered company/title/location/description, scores it against the selected resume, hydrates any existing tracked status by URL, and then reuses the normal Auto Apply path so Progress/history are populated by the backend tracked application.
 - Fully automatic apply has a user-selectable match percentage threshold in the job list header. The value is saved in browser local storage under `jobfinder.autoApplyMatchThreshold` and defaults to the previous 60% cutoff.
 - Application adapter contracts live in `backend/src/services/applicationAdapters/types.ts`. The registry in `applicationAdapters/adapterRegistry.ts` currently registers `seek`, `linkedin`, `employmenthero`, and `generic`; unsupported known ATS platforms route to `generic` until dedicated adapters are added. LinkedIn and Employment Hero use site-profile safe form adapters for login/CAPTCHA handoff, resume upload, profile fields, question pages, sensitive/unknown question review, and forced final-review pause before submit.
 
@@ -79,6 +80,7 @@ JobFinder/
 │   │   ├── ResumeUploader.tsx      # Drag-drop file upload
 │   │   ├── ApplicationProfilePanel.tsx # Common application answers page/card
 │   │   ├── SearchTerms.tsx         # Display/edit generated search terms
+│   │   ├── CustomApplicationForm.tsx # Manual application URL intake
 │   │   ├── LocationSelector.tsx    # Location picker with presets
 │   │   └── JobList.tsx             # Job cards with match scores
 │   ├── hooks/

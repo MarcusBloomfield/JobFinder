@@ -1910,6 +1910,85 @@ textarea {
   flex-wrap: wrap;
 }
 
+.custom-application-form-section {
+  border: 1px solid #e5e9ec;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1.25rem;
+  background-color: #fbfcfd;
+}
+
+.custom-application-form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+}
+
+.custom-application-form-header h3 {
+  margin-bottom: 0;
+  font-size: 1.05rem;
+}
+
+.custom-application-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(3, minmax(150px, 1fr));
+  gap: 0.85rem;
+}
+
+.custom-application-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: var(--dark-color);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.custom-application-form input,
+.custom-application-form textarea {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #d5dce0;
+  border-radius: 6px;
+  color: var(--dark-color);
+  font: inherit;
+}
+
+.custom-application-form textarea {
+  margin-bottom: 0;
+}
+
+.custom-application-form input:focus,
+.custom-application-form textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.12);
+}
+
+.custom-application-description {
+  margin-top: 0.85rem;
+}
+
+.custom-application-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.85rem;
+}
+
+.custom-application-error {
+  color: var(--secondary-color);
+  font-size: 0.9rem;
+}
+
+.custom-application-message {
+  color: #148f77;
+  font-size: 0.9rem;
+}
+
 /* Job List */
 .job-list-header {
   display: flex;
@@ -2508,6 +2587,15 @@ textarea {
   }
 
   .human-intervention-actions {
+    flex-direction: column;
+  }
+
+  .custom-application-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .custom-application-actions {
+    align-items: stretch;
     flex-direction: column;
   }
 
