@@ -23,6 +23,7 @@ interface ApplicationProgressPanelProps {
   summary: ApplicationTrackingSummary | null;
   history: TrackedJobApplication[];
   jobs: Job[];
+  autoApplyMatchThreshold: number;
   isLoading: boolean;
   onRefresh: () => Promise<void>;
   onUpdateJobDetails: (applicationId: string, jobDetails: JobDetails) => Promise<void>;
@@ -100,12 +101,12 @@ const shouldEnrichApplication = (application: TrackedJobApplication): boolean =>
   !application.jobDetails.jobLocation.trim() ||
   !application.jobDetails.suburbOrPostcode.trim();
 
-const getSearchSnapshot = (jobs: Job[]) => ({
+const getSearchSnapshot = (jobs: Job[], autoApplyMatchThreshold: number) => ({
   discovered: jobs.length,
   strongMatches: jobs.filter(job => (job.matchScore || 0) >= 80).length,
   readyToApply: jobs.filter(
     job =>
-      (job.matchScore || 0) >= 60 &&
+      (job.matchScore || 0) >= autoApplyMatchThreshold &&
       job.applicationStatus !== 'applied' &&
       job.applicationStatus !== 'applying' &&
       job.applicationStatus !== 'skipped'
@@ -196,6 +197,7 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
   summary,
   history,
   jobs,
+  autoApplyMatchThreshold,
   isLoading,
   onRefresh,
   onUpdateJobDetails,
@@ -219,7 +221,7 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
   const [applicationRuns, setApplicationRuns] = useState<ApplicationRunRecord[]>([]);
   const [applicationRunsError, setApplicationRunsError] = useState<string | null>(null);
   const [isLoadingApplicationRuns, setIsLoadingApplicationRuns] = useState<boolean>(false);
-  const searchSnapshot = getSearchSnapshot(jobs);
+  const searchSnapshot = getSearchSnapshot(jobs, autoApplyMatchThreshold);
   const selectedApplication = useMemo(
     () => history.find(application => application.id === selectedApplicationId) || null,
     [history, selectedApplicationId]
@@ -436,7 +438,7 @@ const ApplicationProgressPanel: React.FC<ApplicationProgressPanelProps> = ({
                 <strong>{searchSnapshot.strongMatches}</strong>
               </article>
               <article className="application-progress-stat-card">
-                <span className="application-progress-stat-label">Ready To Apply</span>
+                <span className="application-progress-stat-label">{autoApplyMatchThreshold}%+ Ready</span>
                 <strong>{searchSnapshot.readyToApply}</strong>
               </article>
               <article className="application-progress-stat-card">

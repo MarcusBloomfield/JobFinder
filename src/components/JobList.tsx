@@ -6,6 +6,8 @@ interface JobListProps {
   evaluateMatch: (jobId: string) => Promise<void>;
   applyToJob: (jobId: string) => Promise<void>;
   autoApplyMatchingJobs: () => Promise<void>;
+  autoApplyMatchThreshold: number;
+  setAutoApplyMatchThreshold: (threshold: number) => void;
   isLoading: boolean;
   isBulkAutoApplying: boolean;
 }
@@ -15,17 +17,23 @@ const JobList: React.FC<JobListProps> = ({
   evaluateMatch,
   applyToJob,
   autoApplyMatchingJobs,
+  autoApplyMatchThreshold,
+  setAutoApplyMatchThreshold,
   isLoading,
   isBulkAutoApplying
 }) => {
   const [visitedJobIds, setVisitedJobIds] = useState<Set<string>>(new Set());
   const eligibleAutoApplyCount = jobs.filter(
     (job) =>
-      (job.matchScore || 0) >= 60 &&
+      (job.matchScore || 0) >= autoApplyMatchThreshold &&
       job.applicationStatus !== 'applied' &&
       job.applicationStatus !== 'applying' &&
       job.applicationStatus !== 'skipped'
   ).length;
+
+  const handleAutoApplyThresholdChange = (event: React.ChangeEvent<HTMLInputElement>): void => {
+    setAutoApplyMatchThreshold(event.target.valueAsNumber);
+  };
 
   const handleVisitJobSite = (job: Job) => {
     setVisitedJobIds((prev) => {
@@ -66,15 +74,30 @@ const JobList: React.FC<JobListProps> = ({
         <h3>Jobs {jobs.length > 0 && `(${jobs.length})`}</h3>
         {jobs.length > 0 && (
           <div className="job-list-header-actions">
+            <label className="bulk-auto-apply-threshold">
+              <span>Fully auto apply match</span>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                value={autoApplyMatchThreshold}
+                disabled={isBulkAutoApplying}
+                onChange={handleAutoApplyThresholdChange}
+              />
+              <span>%+</span>
+            </label>
             <span className="bulk-auto-apply-summary">
-              {eligibleAutoApplyCount} jobs at 60%+ match
+              {eligibleAutoApplyCount} jobs at {autoApplyMatchThreshold}%+ match
             </span>
             <button
               className="bulk-auto-apply-button"
               disabled={isLoading || isBulkAutoApplying || eligibleAutoApplyCount === 0}
               onClick={() => void autoApplyMatchingJobs()}
             >
-              {isBulkAutoApplying ? 'Auto Applying 60%+ Matches...' : 'Fully Auto Apply 60%+'}
+              {isBulkAutoApplying
+                ? `Auto Applying ${autoApplyMatchThreshold}%+ Matches...`
+                : `Fully Auto Apply ${autoApplyMatchThreshold}%+`}
             </button>
           </div>
         )}

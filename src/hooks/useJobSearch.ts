@@ -42,6 +42,7 @@ interface JobSearchState {
   error: string | null;
   location: string;
   jobSearchAmount: number;
+  autoApplyMatchThreshold: number;
   seekLoginMessage: string | null;
   isSeekLoginLoading: boolean;
   isStoredResumesLoading: boolean;
@@ -67,6 +68,7 @@ interface JobSearchActions {
   loginToSeek: () => Promise<void>;
   setLocation: (location: string) => void;
   setJobSearchAmount: (amount: number) => void;
+  setAutoApplyMatchThreshold: (threshold: number) => void;
   updateApplicationProfile: (updates: Partial<ApplicationProfile>) => void;
   updateAiSettings: (updates: Partial<AiSettings>) => void;
   uploadCoverLetterExample: (file: File) => Promise<void>;
@@ -92,6 +94,18 @@ const getPageLimitForMaxJobs = (maxJobs: number): number => {
 
 const APPLICATION_PROFILE_STORAGE_KEY = 'jobfinder.applicationProfile';
 const AI_SETTINGS_STORAGE_KEY = 'jobfinder.aiSettings';
+const AUTO_APPLY_MATCH_THRESHOLD_STORAGE_KEY = 'jobfinder.autoApplyMatchThreshold';
+const DEFAULT_AUTO_APPLY_MATCH_THRESHOLD = 60;
+
+const normalizeAutoApplyMatchThreshold = (value: unknown): number => {
+  const numericValue = typeof value === 'number' ? value : Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return DEFAULT_AUTO_APPLY_MATCH_THRESHOLD;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(numericValue)));
+};
 
 const loadStoredApplicationProfile = (): ApplicationProfile => {
   if (typeof window === 'undefined') {
@@ -116,6 +130,20 @@ const loadStoredAiSettings = (): AiSettings => {
     return raw ? normalizeAiSettings(JSON.parse(raw)) : { ...DEFAULT_AI_SETTINGS };
   } catch {
     return { ...DEFAULT_AI_SETTINGS };
+  }
+};
+
+const loadStoredAutoApplyMatchThreshold = (): number => {
+  if (typeof window === 'undefined') {
+    return DEFAULT_AUTO_APPLY_MATCH_THRESHOLD;
+  }
+
+  try {
+    return normalizeAutoApplyMatchThreshold(
+      window.localStorage.getItem(AUTO_APPLY_MATCH_THRESHOLD_STORAGE_KEY)
+    );
+  } catch {
+    return DEFAULT_AUTO_APPLY_MATCH_THRESHOLD;
   }
 };
 
@@ -167,6 +195,9 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   const [error, setError] = useState<string | null>(null);
   const [location, setLocation] = useState<string>('Australia');
   const [jobSearchAmount, setJobSearchAmount] = useState<number>(25);
+  const [autoApplyMatchThreshold, setAutoApplyMatchThreshold] = useState<number>(() =>
+    loadStoredAutoApplyMatchThreshold()
+  );
   const [seekLoginMessage, setSeekLoginMessage] = useState<string | null>(null);
   const [isSeekLoginLoading, setIsSeekLoginLoading] = useState<boolean>(false);
   const [isStoredResumesLoading, setIsStoredResumesLoading] = useState<boolean>(false);
@@ -302,6 +333,17 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
 
     window.localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(normalizeAiSettings(aiSettings)));
   }, [aiSettings]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(
+      AUTO_APPLY_MATCH_THRESHOLD_STORAGE_KEY,
+      String(normalizeAutoApplyMatchThreshold(autoApplyMatchThreshold))
+    );
+  }, [autoApplyMatchThreshold]);
 
   const uploadResume = async (file: File): Promise<void> => {
     setIsLoading(true);
@@ -558,7 +600,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
 
     const matchingJobs = jobs.filter(
       job =>
-        (job.matchScore || 0) >= 60 &&
+        (job.matchScore || 0) >= autoApplyMatchThreshold &&
         job.applicationStatus !== 'applied' &&
         job.applicationStatus !== 'applying' &&
         job.applicationStatus !== 'skipped'
@@ -595,7 +637,9 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     }
 
     if (eligibleJobs.length === 0) {
-      setError('No jobs with a 60% or higher match are available within the auto-apply distance limit');
+      setError(
+        `No jobs with a ${autoApplyMatchThreshold}% or higher match are available within the auto-apply distance limit`
+      );
       return;
     }
 
@@ -671,6 +715,10 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
 
   const updateLocation = (newLocation: string): void => {
     setLocation(newLocation);
+  };
+
+  const updateAutoApplyMatchThreshold = (threshold: number): void => {
+    setAutoApplyMatchThreshold(normalizeAutoApplyMatchThreshold(threshold));
   };
 
   const updateApplicationProfile = (updates: Partial<ApplicationProfile>): void => {
@@ -808,6 +856,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       error,
       location,
       jobSearchAmount,
+      autoApplyMatchThreshold,
       seekLoginMessage,
       isSeekLoginLoading,
       isStoredResumesLoading,
@@ -832,6 +881,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       loginToSeek,
       setLocation: updateLocation,
       setJobSearchAmount,
+      setAutoApplyMatchThreshold: updateAutoApplyMatchThreshold,
       updateApplicationProfile,
       updateAiSettings,
       uploadCoverLetterExample,

@@ -48,6 +48,7 @@ const App: React.FC = () => {
             error,
             location,
             jobSearchAmount,
+            autoApplyMatchThreshold,
             seekLoginMessage,
             isSeekLoginLoading,
             isStoredResumesLoading,
@@ -72,6 +73,7 @@ const App: React.FC = () => {
             loginToSeek,
             setLocation,
             setJobSearchAmount,
+            setAutoApplyMatchThreshold,
             updateApplicationProfile,
             updateAiSettings,
             uploadCoverLetterExample,
@@ -155,6 +157,7 @@ const App: React.FC = () => {
                         summary={applicationTrackingSummary}
                         history={applicationHistory}
                         jobs={jobs}
+                        autoApplyMatchThreshold={autoApplyMatchThreshold}
                         isLoading={isApplicationTrackingLoading}
                         onRefresh={refreshApplicationTracking}
                         onUpdateJobDetails={updateTrackedApplicationJobDetails}
@@ -261,6 +264,8 @@ const App: React.FC = () => {
                                         evaluateMatch={evaluateMatch}
                                         applyToJob={applyToJob}
                                         autoApplyMatchingJobs={autoApplyMatchingJobs}
+                                        autoApplyMatchThreshold={autoApplyMatchThreshold}
+                                        setAutoApplyMatchThreshold={setAutoApplyMatchThreshold}
                                         isLoading={isLoading}
                                         isBulkAutoApplying={isBulkAutoApplying}
                                     />

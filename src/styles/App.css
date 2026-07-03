@@ -1747,6 +1747,30 @@ textarea {
   color: var(--gray-color);
 }
 
+.bulk-auto-apply-threshold {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--dark-color);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.bulk-auto-apply-threshold input {
+  width: 4.25rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #d5dce0;
+  border-radius: 6px;
+  color: var(--dark-color);
+  font: inherit;
+}
+
+.bulk-auto-apply-threshold input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.12);
+}
+
 .bulk-auto-apply-button {
   background-color: var(--dark-color);
 }
