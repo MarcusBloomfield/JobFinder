@@ -1,4 +1,4 @@
-import { Browser, BrowserContext, chromium, Page } from 'playwright';
+import { BrowserContext, chromium, Page } from 'playwright';
 import * as cheerio from 'cheerio';
 import fs from 'fs';
 import path from 'path';
@@ -10,6 +10,7 @@ export type JobSearchSite = typeof SUPPORTED_JOB_SEARCH_SITES[number];
 
 const PLAYWRIGHT_DIR = path.resolve(__dirname, '../../.playwright');
 const JOB_SEARCH_HTML_DIR = path.join(PLAYWRIGHT_DIR, 'job-search-html');
+const DEFAULT_JOB_SEARCH_PROFILE_DIR = 'job-search-profile';
 const SITE_PROFILE_DIRS: Record<JobSearchSite, string> = {
   seek: 'seek-profile',
   linkedin: 'linkedin-profile',
@@ -67,14 +68,14 @@ const getBrowserChannel = (): 'chrome' | 'msedge' | undefined => {
   return undefined;
 };
 
-const getUserDataDir = (site?: JobSearchSite): string | undefined => {
+const getUserDataDir = (site?: JobSearchSite): string => {
   const configured = process.env.PLAYWRIGHT_USER_DATA_DIR?.trim();
   if (configured && !site) {
     return configured;
   }
 
   if (!site) {
-    return undefined;
+    return path.join(PLAYWRIGHT_DIR, DEFAULT_JOB_SEARCH_PROFILE_DIR);
   }
 
   if (configured && site === 'seek') {
@@ -82,6 +83,28 @@ const getUserDataDir = (site?: JobSearchSite): string | undefined => {
   }
 
   return path.join(PLAYWRIGHT_DIR, SITE_PROFILE_DIRS[site]);
+};
+
+const inferJobSearchSiteFromUrl = (jobUrl: string): JobSearchSite | undefined => {
+  try {
+    const hostname = new URL(jobUrl).hostname.toLowerCase();
+
+    if (hostname.endsWith('seek.com.au')) {
+      return 'seek';
+    }
+
+    if (hostname.endsWith('linkedin.com')) {
+      return 'linkedin';
+    }
+
+    if (hostname.endsWith('employmenthero.com') || hostname.endsWith('swagapp.com')) {
+      return 'employmenthero';
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
 };
 
 const getDefaultViewport = () => {
@@ -93,7 +116,6 @@ const getDefaultViewport = () => {
 };
 
 interface BrowserSession {
-  browser?: Browser;
   context: BrowserContext;
   page: Page;
 }
@@ -348,47 +370,24 @@ const launchBrowserSession = async (
   const viewport = getDefaultViewport();
 
   console.log(`Browser channel: ${channel ?? 'playwright-chromium'}`);
-  if (userDataDir) {
-    console.log(`Using persistent browser profile: ${userDataDir}`);
-    fs.mkdirSync(userDataDir, { recursive: true });
-    try {
-      const context = await chromium.launchPersistentContext(userDataDir, {
-        channel,
-        headless,
-        slowMo,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        viewport,
-        userAgent
-      });
+  console.log(`Using persistent browser profile: ${userDataDir}`);
+  fs.mkdirSync(userDataDir, { recursive: true });
 
-      let page = context.pages()[0];
-      if (!page) {
-        page = await context.newPage();
-      }
-
-      return { context, page };
-    } catch (error) {
-      console.warn(
-        `Could not open persistent ${site || 'job search'} profile; falling back to a temporary browser context:`,
-        error instanceof Error ? error.message : error
-      );
-    }
-  }
-
-  const browser = await chromium.launch({
+  const context = await chromium.launchPersistentContext(userDataDir, {
     channel,
     headless,
+    slowMo,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    slowMo
+    viewport,
+    userAgent
   });
 
-  const context = await browser.newContext({
-    userAgent,
-    viewport
-  });
-  const page = await context.newPage();
+  let page = context.pages()[0];
+  if (!page) {
+    page = await context.newPage();
+  }
 
-  return { browser, context, page };
+  return { context, page };
 };
 
 /**
@@ -722,9 +721,7 @@ export const scrapeJobSite = async (
     console.log(`Delay before closing browser: ${closingDelay}ms`);
     await delay(closingDelay);
 
-    if (session?.browser) {
-      await session.browser.close();
-    } else if (session?.context) {
+    if (session?.context) {
       await session.context.close();
     }
   }
@@ -1022,7 +1019,7 @@ const getEmploymentHeroCardText = ($: cheerio.CheerioAPI, card: any, selectors: 
   const values: string[] = [];
 
   selectors.forEach(selector => {
-    card.find(selector).each((_, element) => {
+    card.find(selector).each((_: number, element: any) => {
       const text = normalizeWhitespace($(element).text());
       if (text && !values.includes(text)) {
         values.push(text);
@@ -1127,7 +1124,12 @@ export const scrapeJobListingDetails = async (jobUrl: string): Promise<ScrapedJo
   let session: BrowserSession | undefined;
 
   try {
-    session = await launchBrowserSession(headless, slowMo, userAgent);
+    session = await launchBrowserSession(
+      headless,
+      slowMo,
+      userAgent,
+      inferJobSearchSiteFromUrl(jobUrl)
+    );
     const { page } = session;
 
     await page.goto(jobUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -1179,9 +1181,7 @@ export const scrapeJobListingDetails = async (jobUrl: string): Promise<ScrapedJo
     console.error(`Error scraping job listing details for ${jobUrl}:`, error);
     return {};
   } finally {
-    if (session?.browser) {
-      await session.browser.close();
-    } else if (session?.context) {
+    if (session?.context) {
       await session.context.close();
     }
   }

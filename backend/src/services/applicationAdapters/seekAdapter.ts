@@ -1318,7 +1318,7 @@ const buildCoverLetterUploadPayload = (coverLetterDocument: CoverLetterDocumentS
   buffer: fs.readFileSync(coverLetterDocument.filePath)
 });
 
-const closeSeekLoginSessionIfOpen = async (): Promise<void> => {
+export const closeSeekLoginSessionIfOpen = async (): Promise<void> => {
   if (!seekLoginSession) {
     return;
   }

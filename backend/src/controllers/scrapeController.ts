@@ -1,11 +1,18 @@
 import { Request, Response } from 'express';
 import * as scrapeService from '../services/scrapeService';
 import { JobSearchSite, SUPPORTED_JOB_SEARCH_SITES } from '../services/scrapeService';
+import * as applicationAgentService from '../services/applicationAgentService';
 
 const validSites: readonly JobSearchSite[] = SUPPORTED_JOB_SEARCH_SITES;
 
 const isJobSearchSite = (site: unknown): site is JobSearchSite =>
   typeof site === 'string' && validSites.includes(site as JobSearchSite);
+
+const closeLoginBrowsersForSearch = async (sites: JobSearchSite[]): Promise<void> => {
+  await Promise.all(
+    Array.from(new Set(sites)).map(site => applicationAgentService.closeJobSiteLoginBrowserSession(site))
+  );
+};
 
 /**
  * Scrape jobs from a specific job site
@@ -35,6 +42,8 @@ export const scrapeJobSite = async (req: Request, res: Response) => {
     
     // Default location to Perth, WA if not provided
     const locationToUse = location || 'Perth, WA';
+
+    await closeLoginBrowsersForSearch([site]);
     
     // Call the scrape service
     const jobs = await scrapeService.scrapeJobSite(site, searchTerms, locationToUse, limit, requestedMaxJobs);
@@ -90,6 +99,8 @@ export const scrapeJobs = async (req: Request, res: Response) => {
     
     // Default location to Perth, WA if not provided
     const locationToUse = location || 'Perth, WA';
+
+    await closeLoginBrowsersForSearch(sitesToSearch);
     
     // Call the scrape service
     const jobs = await scrapeService.scrapeJobs(searchTerms, sitesToSearch, limit, locationToUse, requestedMaxJobs);

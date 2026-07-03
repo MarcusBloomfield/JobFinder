@@ -34,6 +34,7 @@ import {
   CoverLetterDocumentSnapshot,
   TailoredResumeSnapshot,
   buildApplicationSnapshot,
+  closeSeekLoginSessionIfOpen,
   openSeekLoginBrowser
 } from './applicationAdapters/seekAdapter';
 
@@ -349,6 +350,15 @@ export const openJobSiteLoginBrowser = async (
   }
 
   return openSharedLoginBrowser(loginBrowserConfigs[platform]);
+};
+
+export const closeJobSiteLoginBrowserSession = async (platform: LoginPlatform): Promise<void> => {
+  if (platform === 'seek') {
+    await closeSeekLoginSessionIfOpen();
+    return;
+  }
+
+  await closeLoginSessionIfOpen(platform);
 };
 
 export const applyToJob = async (
