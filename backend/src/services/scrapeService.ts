@@ -9,7 +9,7 @@ export const SUPPORTED_JOB_SEARCH_SITES = ['seek', 'linkedin', 'employmenthero']
 export type JobSearchSite = typeof SUPPORTED_JOB_SEARCH_SITES[number];
 
 const PLAYWRIGHT_DIR = path.resolve(__dirname, '../../.playwright');
-const LINKEDIN_SEARCH_SNAPSHOT_DIR = path.join(PLAYWRIGHT_DIR, 'linkedin-search-pages');
+const JOB_SEARCH_HTML_DIR = path.join(PLAYWRIGHT_DIR, 'job-search-html');
 const SITE_PROFILE_DIRS: Record<JobSearchSite, string> = {
   seek: 'seek-profile',
   linkedin: 'linkedin-profile',
@@ -116,6 +116,13 @@ const dedupeJobs = (jobs: Job[]): Job[] => {
 
 const normalizeWhitespace = (value: string): string => value.replace(/\s+/g, ' ').trim();
 
+const sanitizeSnapshotName = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'search';
+
 const normalizeMultilineText = (value: string): string =>
   value
     .replace(/\r/g, '')
@@ -123,36 +130,6 @@ const normalizeMultilineText = (value: string): string =>
     .replace(/\n[ \t]+/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-
-const sanitizeSnapshotPart = (value: string): string =>
-  normalizeWhitespace(value)
-    .replace(/[^a-z0-9-]+/gi, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80) || 'linkedin-search';
-
-const saveLinkedInSearchPageSnapshot = async (page: Page, html: string): Promise<void> => {
-  const pageUrl = page.url();
-  if (!pageUrl.includes('linkedin.')) {
-    return;
-  }
-
-  try {
-    await fs.promises.mkdir(LINKEDIN_SEARCH_SNAPSHOT_DIR, { recursive: true });
-    const url = new URL(pageUrl);
-    const keywords = url.searchParams.get('keywords') || 'search';
-    const location = url.searchParams.get('location') || '';
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const fileName = `${timestamp}-${sanitizeSnapshotPart(keywords)}-${sanitizeSnapshotPart(location)}.html`;
-    const filePath = path.join(LINKEDIN_SEARCH_SNAPSHOT_DIR, fileName);
-    await fs.promises.writeFile(filePath, html, 'utf8');
-    console.log(`Saved LinkedIn search HTML snapshot: ${filePath}`);
-  } catch (error) {
-    console.warn(
-      'Could not save LinkedIn search HTML snapshot:',
-      error instanceof Error ? error.message : error
-    );
-  }
-};
 
 const getRandomUserAgent = (): string => {
   const userAgents = [
@@ -187,19 +164,32 @@ const getFirstMultilineText = (root: any, selectors: string[]): string => {
   return '';
 };
 
-const getFirstAttribute = (root: any, selectors: string[], attribute: string): string => {
-  for (const selector of selectors) {
-    const value = normalizeWhitespace(root.find(selector).first().attr(attribute) || '');
-    if (value) {
-      return value;
-    }
-  }
-
-  return '';
-};
-
 const decodeHtmlToText = (value: string): string =>
   normalizeMultilineText(cheerio.load(`<div>${value}</div>`).text());
+
+const saveEmploymentHeroHtmlSnapshot = async (
+  page: Page,
+  searchTerms: string,
+  location: string
+): Promise<void> => {
+  try {
+    fs.mkdirSync(JOB_SEARCH_HTML_DIR, { recursive: true });
+    const html = await page.content();
+    const label = sanitizeSnapshotName(`${searchTerms}-${location}`);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const latestPath = path.join(JOB_SEARCH_HTML_DIR, 'employmenthero-latest.html');
+    const timestampedPath = path.join(JOB_SEARCH_HTML_DIR, `employmenthero-${label}-${timestamp}.html`);
+
+    fs.writeFileSync(latestPath, html, 'utf8');
+    fs.writeFileSync(timestampedPath, html, 'utf8');
+    console.log(`Saved Employment Hero job search HTML snapshot: ${timestampedPath}`);
+  } catch (error) {
+    console.warn(
+      'Could not save Employment Hero job search HTML snapshot:',
+      error instanceof Error ? error.message : error
+    );
+  }
+};
 
 const inferSuburbOrPostcode = (value?: string): string => {
   const normalized = normalizeWhitespace(value || '');
@@ -332,9 +322,6 @@ const getClosestJobCard = ($: cheerio.CheerioAPI, element: any): any => {
     '.job_seen_beacon',
     '.base-card',
     '.job-search-card',
-    '.jobs-search-results__list-item',
-    '.job-card-container',
-    '.job-card-list',
     'article',
     'li',
     '[data-testid="job-card"]'
@@ -503,16 +490,11 @@ const siteConfigs: Record<JobSearchSite, ScrapeConfig> = {
   },
   linkedin: {
     searchUrl: 'https://www.linkedin.com/jobs/search/?keywords=',
-    titleSelector:
-      '.base-search-card__title, .job-card-list__title, a.job-card-list__title, .job-card-container__link, [data-test-job-card-title]',
-    companySelector:
-      '.base-search-card__subtitle, .job-card-container__primary-description, .artdeco-entity-lockup__subtitle, [data-test-job-card-company-name]',
-    descriptionSelector:
-      '.base-search-card__metadata, .job-search-card__snippet, .job-card-list__insight, .job-card-container__job-insight-text, [data-test-job-card-summary]',
-    linkSelector:
-      'a.base-card__full-link, a.job-card-list__title, a.job-card-container__link, a[href*="/jobs/view/"], a[href*="currentJobId="]',
-    locationSelector:
-      '.job-search-card__location, .job-card-container__metadata-item, .artdeco-entity-lockup__caption, [data-test-job-card-location]',
+    titleSelector: '.base-search-card__title, .job-card-list__title, a.job-card-list__title',
+    companySelector: '.base-search-card__subtitle, .job-card-container__primary-description',
+    descriptionSelector: '.base-search-card__metadata, .job-search-card__snippet',
+    linkSelector: 'a.base-card__full-link, a.job-card-list__title, a[href*="/jobs/view/"]',
+    locationSelector: '.job-search-card__location, .job-card-container__metadata-item',
     salarySelector: '.job-search-card__salary-info',
     datePostedSelector: 'time, .job-search-card__listdate',
     locationParam: '&location=',
@@ -520,10 +502,22 @@ const siteConfigs: Record<JobSearchSite, ScrapeConfig> = {
   },
   employmenthero: {
     searchUrl: 'https://employmenthero.com/jobs/',
-    titleSelector: '.eh-job-item__title, a.eh-job-item',
+    titleSelector: [
+      '.eh-job-item__title',
+      '[data-wp-text*="title"]',
+      '[class*="job"][class*="title"]',
+      'a[href*="/jobs/position/"]',
+      'a[href*="jobs.employmenthero.com/jobs/"]',
+      'a[href*="swagapp.com/jobs/"]'
+    ].join(', '),
     companySelector: '.eh-job-item__company',
     descriptionSelector: '.eh-job-item__description, .eh-job-item__details',
-    linkSelector: 'a.eh-job-item, a[href*="/jobs/position/"]',
+    linkSelector: [
+      'a.eh-job-item',
+      'a[href*="/jobs/position/"]',
+      'a[href*="jobs.employmenthero.com/jobs/"]',
+      'a[href*="swagapp.com/jobs/"]'
+    ].join(', '),
     locationSelector: '.eh-job-item__location, [data-wp-text="context.item.location"]',
     salarySelector: '.eh-job-item__salary',
     datePostedSelector: '.eh-job-item__posted-date, .eh-job-item__date',
@@ -559,8 +553,18 @@ const runEmploymentHeroSearch = async (
   searchTerms: string,
   location: string
 ): Promise<void> => {
-  const input = page.locator('.nlp-search-input').first();
+  const input = page
+    .locator(
+      [
+        '.nlp-search-input',
+        'input[type="search"]',
+        'input[placeholder*="Search"]',
+        'input[aria-label*="Search"]'
+      ].join(', ')
+    )
+    .first();
   if ((await input.count()) === 0) {
+    await saveEmploymentHeroHtmlSnapshot(page, searchTerms, location);
     return;
   }
 
@@ -577,6 +581,7 @@ const runEmploymentHeroSearch = async (
 
   await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => undefined);
   await page.waitForTimeout(2500);
+  await saveEmploymentHeroHtmlSnapshot(page, searchTerms, location);
 };
 
 /**
@@ -744,19 +749,8 @@ const extractJobsFromPage = async (
   await delay(contentDelay);
   
   const content = await page.content();
-  if (site === 'linkedin') {
-    await saveLinkedInSearchPageSnapshot(page, content);
-  }
-
   const $ = cheerio.load(content);
   const jobs: Job[] = [];
-
-  if (site === 'linkedin') {
-    const linkedInJobs = extractLinkedInJobs($);
-    if (linkedInJobs.length > 0) {
-      return linkedInJobs;
-    }
-  }
 
   if (site === 'employmenthero') {
     const employmentHeroJobs = extractEmploymentHeroJobs($);
@@ -816,158 +810,240 @@ const extractJobsFromPage = async (
   return jobs;
 };
 
-const normalizeLinkedInJobUrl = (href: string): string => {
-  const raw = normalizeWhitespace(href);
-  if (!raw) {
-    return '';
-  }
+const stripHtml = (value: string): string => normalizeMultilineText(cheerio.load(value).text());
 
-  try {
-    const url = new URL(raw, 'https://www.linkedin.com');
-    const viewMatch = url.pathname.match(/\/jobs\/view\/(\d+)/);
-    const currentJobId = url.searchParams.get('currentJobId');
-    const jobId = viewMatch?.[1] || currentJobId || '';
-    if (jobId) {
-      return `https://www.linkedin.com/jobs/view/${jobId}/`;
+const readEmploymentHeroString = (record: Record<string, any>, keys: string[]): string => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' || typeof value === 'number') {
+      const normalized = normalizeWhitespace(String(value));
+      if (normalized) {
+        return normalized;
+      }
     }
 
-    if (url.hostname.includes('linkedin.') && url.pathname.includes('/jobs/')) {
-      return url.toString();
+    if (value && typeof value === 'object') {
+      const nestedName = readEmploymentHeroString(value as Record<string, any>, [
+        'name',
+        'title',
+        'label',
+        'city',
+        'suburb',
+        'state',
+        'region',
+        'postcode',
+        'postalCode'
+      ]);
+      if (nestedName) {
+        return nestedName;
+      }
     }
-  } catch {
-    return '';
   }
 
   return '';
 };
 
-const extractLinkedInJobTitle = (card: any, link: any): string => {
-  const candidates = [
-    link.find('strong').first().text(),
-    link.find('[aria-hidden="true"]').first().text(),
-    link.text(),
-    link.attr('aria-label'),
-    link.attr('title')
-  ];
+const buildEmploymentHeroLocation = (record: Record<string, any>): string => {
+  const location = record.location || record.job_location || record.address;
+  if (typeof location === 'string') {
+    return normalizeWhitespace(location);
+  }
 
-  for (const candidate of candidates) {
-    const title = normalizeWhitespace(candidate || '').replace(/^View job:\s*/i, '');
-    if (title) {
-      return title;
+  if (location && typeof location === 'object') {
+    const locationRecord = location as Record<string, any>;
+    const parts = [
+      locationRecord.city,
+      locationRecord.suburb,
+      locationRecord.addressLocality,
+      locationRecord.state,
+      locationRecord.region,
+      locationRecord.addressRegion,
+      locationRecord.postcode,
+      locationRecord.postalCode
+    ]
+      .map(value => (typeof value === 'string' || typeof value === 'number' ? normalizeWhitespace(String(value)) : ''))
+      .filter(Boolean);
+
+    if (parts.length > 0) {
+      return Array.from(new Set(parts)).join(', ');
     }
   }
 
-  return getFirstText(card, [
-    '.base-search-card__title',
-    '.job-card-list__title',
-    '.job-card-container__link',
-    '.job-card-container__title',
-    '.jobs-unified-top-card__job-title',
-    '.artdeco-entity-lockup__title',
-    '[data-test-job-card-title]',
-    'strong'
+  return readEmploymentHeroString(record, [
+    'location_name',
+    'city',
+    'suburb',
+    'state',
+    'region',
+    'remote_flexibility',
+    'workplace_type'
   ]);
 };
 
-const extractLinkedInJobs = ($: cheerio.CheerioAPI): Job[] => {
-  const jobsByUrl = new Map<string, Job>();
+const toEmploymentHeroJobUrl = (rawUrl: string, record: Record<string, any>): string => {
+  const url = normalizeWhitespace(rawUrl);
+  if (url) {
+    return new URL(url, 'https://employmenthero.com').toString();
+  }
 
-  $('a[href*="/jobs/view/"], a[href*="currentJobId="]').each((_, element) => {
-    const link = $(element);
-    const url = normalizeLinkedInJobUrl(link.attr('href') || '');
-    if (!url || jobsByUrl.has(url)) {
-      return;
+  const slug = readEmploymentHeroString(record, ['slug', 'job_slug']);
+  if (slug) {
+    return new URL(`/jobs/position/${slug}`, 'https://employmenthero.com').toString();
+  }
+
+  const id = readEmploymentHeroString(record, ['id', 'uuid', 'job_id']);
+  if (id) {
+    return new URL(`/jobs/position/${id}`, 'https://employmenthero.com').toString();
+  }
+
+  return '';
+};
+
+const createEmploymentHeroJobFromRecord = (record: Record<string, any>): Job | null => {
+  const title = readEmploymentHeroString(record, ['title', 'job_title', 'position_title', 'name']);
+  const url = toEmploymentHeroJobUrl(
+    readEmploymentHeroString(record, [
+      'jobUrl',
+      'job_url',
+      'url',
+      'link',
+      'permalink',
+      'absolute_url',
+      'application_url',
+      'apply_url'
+    ]),
+    record
+  );
+
+  if (!title || !url) {
+    return null;
+  }
+
+  return {
+    id: uuidv4(),
+    title,
+    company: readEmploymentHeroString(record, [
+      'organisation_name',
+      'organization_name',
+      'organisationName',
+      'organizationName',
+      'company_name',
+      'companyName',
+      'company',
+      'employer'
+    ]),
+    description: stripHtml(
+      readEmploymentHeroString(record, [
+        'description',
+        'short_description',
+        'summary',
+        'excerpt',
+        'job_description'
+      ])
+    ),
+    url,
+    location: buildEmploymentHeroLocation(record),
+    salary: readEmploymentHeroString(record, [
+      'formatted_salary_range',
+      'salary',
+      'salary_range',
+      'pay_range'
+    ]),
+    datePosted: readEmploymentHeroString(record, [
+      'formatted_posted_date',
+      'posted_at',
+      'date_posted',
+      'created_at',
+      'published_at'
+    ])
+  };
+};
+
+const collectEmploymentHeroJobRecords = (
+  value: unknown,
+  jobs: Job[],
+  seen: Set<unknown> = new Set()
+): void => {
+  if (!value || typeof value !== 'object' || seen.has(value)) {
+    return;
+  }
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    value.forEach(item => collectEmploymentHeroJobRecords(item, jobs, seen));
+    return;
+  }
+
+  const record = value as Record<string, any>;
+  const job = createEmploymentHeroJobFromRecord(record);
+  if (job) {
+    jobs.push(job);
+  }
+
+  Object.values(record).forEach(nestedValue => collectEmploymentHeroJobRecords(nestedValue, jobs, seen));
+};
+
+const isEmploymentHeroJobHref = (href?: string, linkText: string = ''): boolean => {
+  if (!href) {
+    return false;
+  }
+
+  try {
+    const url = new URL(href, 'https://employmenthero.com');
+    const hostname = url.hostname.toLowerCase();
+    const pathname = url.pathname.toLowerCase().replace(/\/+$/, '');
+
+    const looksLikePostedJobCard = /\bposted\b/i.test(linkText);
+
+    if (hostname.endsWith('swagapp.com')) {
+      return pathname.includes('/jobs/') && looksLikePostedJobCard;
     }
 
-    const card = getClosestJobCard($, element);
-    const title = extractLinkedInJobTitle(card, link);
-    if (!title) {
-      return;
+    if (!hostname.endsWith('employmenthero.com')) {
+      return false;
     }
 
-    const company = getFirstText(card, [
-      '.base-search-card__subtitle',
-      '.job-card-container__primary-description',
-      '.artdeco-entity-lockup__subtitle',
-      '[data-test-job-card-company-name]',
-      'a[href*="/company/"]'
-    ]);
-    const description = getFirstMultilineText(card, [
-      '.job-search-card__snippet',
-      '.base-search-card__metadata',
-      '.job-card-list__insight',
-      '.job-card-container__job-insight-text',
-      '[data-test-job-card-summary]'
-    ]);
-    const location = getFirstText(card, [
-      '.job-search-card__location',
-      '.job-card-container__metadata-item',
-      '.artdeco-entity-lockup__caption',
-      '[data-test-job-card-location]'
-    ]);
-    const salary = getFirstText(card, [
-      '.job-search-card__salary-info',
-      '.job-card-container__metadata-wrapper li'
-    ]);
-    const datePosted =
-      getFirstText(card, ['time', '.job-search-card__listdate']) ||
-      getFirstAttribute(card, ['time'], 'datetime');
+    if (pathname === '/jobs') {
+      return false;
+    }
 
-    jobsByUrl.set(url, {
-      id: uuidv4(),
-      title,
-      company,
-      description,
-      url,
-      location,
-      salary,
-      datePosted
+    return (
+      pathname.startsWith('/jobs/position/') ||
+      (hostname.startsWith('jobs.') && pathname.startsWith('/jobs/')) ||
+      (pathname.startsWith('/jobs/') && looksLikePostedJobCard)
+    );
+  } catch {
+    return false;
+  }
+};
+
+const getEmploymentHeroCardText = ($: cheerio.CheerioAPI, card: any, selectors: string[]): string => {
+  const values: string[] = [];
+
+  selectors.forEach(selector => {
+    card.find(selector).each((_, element) => {
+      const text = normalizeWhitespace($(element).text());
+      if (text && !values.includes(text)) {
+        values.push(text);
+      }
     });
   });
 
-  console.log(`Extracted ${jobsByUrl.size} LinkedIn jobs from anchors`);
-  return Array.from(jobsByUrl.values());
+  return values[0] || '';
 };
-
-const stripHtml = (value: string): string => normalizeMultilineText(cheerio.load(value).text());
 
 const extractEmploymentHeroJobs = ($: cheerio.CheerioAPI): Job[] => {
   const jobs: Job[] = [];
 
-  $('.eh-job-list[data-wp-context]').each((_, element) => {
+  $('[data-wp-context]').each((_, element) => {
     const rawContext = $(element).attr('data-wp-context');
     if (!rawContext) {
       return;
     }
 
     try {
-      const context = JSON.parse(rawContext) as {
-        jobs?: Array<Record<string, any>>;
-        jobListState?: { jobs?: Array<Record<string, any>> };
-      };
-      const contextJobs = context.jobs || context.jobListState?.jobs || [];
-      contextJobs.forEach(job => {
-        const title = normalizeWhitespace(String(job.title || ''));
-        const url = normalizeWhitespace(String(job.jobUrl || job.url || ''));
-        if (!title || !url) {
-          return;
-        }
-
-        jobs.push({
-          id: uuidv4(),
-          title,
-          company: normalizeWhitespace(
-            String(job.organisation_name || job.organization_name || job.company_name || '')
-          ),
-          description: stripHtml(String(job.description || job.short_description || '')),
-          url: new URL(url, 'https://employmenthero.com').toString(),
-          location: normalizeWhitespace(
-            String(job.location || job.location_name || job.city || job.remote_flexibility || '')
-          ),
-          salary: normalizeWhitespace(String(job.formatted_salary_range || job.salary || '')),
-          datePosted: normalizeWhitespace(String(job.formatted_posted_date || job.created_at || ''))
-        });
-      });
+      collectEmploymentHeroJobRecords(JSON.parse(rawContext), jobs);
     } catch {
       // Fall back to DOM selectors below.
     }
@@ -977,27 +1053,63 @@ const extractEmploymentHeroJobs = ($: cheerio.CheerioAPI): Job[] => {
     return jobs;
   }
 
-  $('a.eh-job-item, a[href*="/jobs/position/"]').each((_, element) => {
+  $('a[href]').each((_, element) => {
     const card = $(element);
-    const title = normalizeWhitespace(card.find('.eh-job-item__title').first().text() || card.text());
     const href = card.attr('href');
+    const title = normalizeWhitespace(card.find('.eh-job-item__title').first().text() || card.text());
+    if (!isEmploymentHeroJobHref(href, title)) {
+      return;
+    }
+
+    const parentCard = card.closest(
+      'article, li, [data-wp-context], [data-testid*="job"], [class*="job"], [class*="Job"]'
+    );
+    const jobCard = parentCard.length > 0 ? parentCard : card;
     if (!title || !href) {
       return;
     }
 
     jobs.push({
       id: uuidv4(),
-      title,
-      company: normalizeWhitespace(card.find('.eh-job-item__company').first().text()),
+      title: getEmploymentHeroCardText($, jobCard, [
+        '.eh-job-item__title',
+        '[data-wp-text*="title"]',
+        '[class*="title"]',
+        'h1',
+        'h2',
+        'h3'
+      ]) || title,
+      company: getEmploymentHeroCardText($, jobCard, [
+        '.eh-job-item__company',
+        '[data-wp-text*="company"]',
+        '[data-wp-text*="organisation"]',
+        '[data-wp-text*="organization"]',
+        '[class*="company"]',
+        '[class*="organisation"]',
+        '[class*="organization"]'
+      ]),
       description: normalizeMultilineText(
-        card.find('.eh-job-item__description, .eh-job-item__details').first().text()
+        jobCard.find('.eh-job-item__description, .eh-job-item__details, [class*="description"]').first().text()
       ),
       url: new URL(href, 'https://employmenthero.com').toString(),
-      location: normalizeWhitespace(card.find('.eh-job-item__location').first().text()),
-      salary: normalizeWhitespace(card.find('.eh-job-item__salary').first().text()),
-      datePosted: normalizeWhitespace(
-        card.find('.eh-job-item__posted-date, .eh-job-item__date').first().text()
-      )
+      location: getEmploymentHeroCardText($, jobCard, [
+        '.eh-job-item__location',
+        '[data-wp-text*="location"]',
+        '[class*="location"]'
+      ]),
+      salary: getEmploymentHeroCardText($, jobCard, [
+        '.eh-job-item__salary',
+        '[data-wp-text*="salary"]',
+        '[class*="salary"]'
+      ]),
+      datePosted: getEmploymentHeroCardText($, jobCard, [
+        '.eh-job-item__posted-date',
+        '.eh-job-item__date',
+        '[data-wp-text*="posted"]',
+        'time',
+        '[class*="posted"]',
+        '[class*="date"]'
+      ])
     });
   });
 
