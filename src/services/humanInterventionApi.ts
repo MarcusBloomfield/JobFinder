@@ -34,6 +34,18 @@ export interface HumanInterventionRecord {
   resolvedAt?: string;
 }
 
+export interface HumanInterventionResolutionInput {
+  message?: string;
+  approvedAnswers?: Array<{
+    controlIndex: number;
+    question: string;
+    answer: string;
+    controlKind?: string;
+    safetyCategory?: string;
+    savedFormAnswerId?: string;
+  }>;
+}
+
 export interface HumanInterventionArtifact {
   kind: string;
   step: number;
@@ -62,7 +74,8 @@ export const fetchPendingHumanInterventions = async (): Promise<HumanInterventio
 
 export const resolveHumanIntervention = async (
   interventionId: string,
-  action: HumanInterventionAction
+  action: HumanInterventionAction,
+  input: HumanInterventionResolutionInput = {}
 ): Promise<HumanInterventionRecord> => {
   const pathByAction: Record<HumanInterventionAction, string> = {
     continued: 'continue',
@@ -70,7 +83,8 @@ export const resolveHumanIntervention = async (
     failed: 'fail'
   };
   const response = await axios.post(
-    `${API_URL}/interventions/${encodeURIComponent(interventionId)}/${pathByAction[action]}`
+    `${API_URL}/interventions/${encodeURIComponent(interventionId)}/${pathByAction[action]}`,
+    input
   );
 
   return getResponseData<HumanInterventionRecord>(response.data);

@@ -75,6 +75,8 @@ const NEXT_BUTTON_PATTERN =
 const FINAL_SUBMIT_BUTTON_PATTERN =
   /^(submit|submit application|send application|complete application|finish application|confirm application|apply)$/i;
 const REVIEW_BUTTON_PATTERN = /^(review|review application|preview|preview application)$/i;
+const TRUE_PATTERN = /^(true|yes|y|1|checked|check|on|agree|agreed|accept|accepted)$/i;
+const FALSE_PATTERN = /^(false|no|n|0|unchecked|uncheck|off)$/i;
 
 interface ButtonCandidate {
   text: string;
@@ -94,12 +96,22 @@ interface StepSnapshot {
 interface InterventionOutcome {
   resolution: 'continued' | 'skipped' | 'failed' | 'pending';
   interventionId: string;
+  approvedAnswers: ApprovedHumanAnswer[];
 }
 
 interface ResumeUploadPayload {
   name: string;
   mimeType: string;
   buffer: Buffer;
+}
+
+interface ApprovedHumanAnswer {
+  controlIndex: number;
+  question: string;
+  answer: string;
+  controlKind?: string;
+  safetyCategory?: string;
+  savedFormAnswerId?: string;
 }
 
 const slugify = (value: string): string =>
@@ -340,6 +352,130 @@ const summarizeHumanDecisions = (decisions: FormMappingDecision[]): string =>
       return `${category}: ${compactText(decision.reason, 140)}`;
     })
     .join(' | ');
+
+const getControlQuestion = (control: ExtractedFormControl | undefined): string => {
+  if (!control) {
+    return 'Unknown application question';
+  }
+
+  return compactText(
+    control.labelText ||
+      control.ariaLabel ||
+      control.placeholder ||
+      control.parentText ||
+      control.nearbyText ||
+      control.name ||
+      control.id ||
+      'Unknown application question',
+    500
+  );
+};
+
+const getSavedAnswerControlKind = (control: ExtractedFormControl | undefined): string => {
+  if (!control) {
+    return 'unknown';
+  }
+
+  if (control.tag === 'textarea') {
+    return 'textarea';
+  }
+
+  if (control.tag === 'select') {
+    return 'select';
+  }
+
+  if (control.type === 'checkbox') {
+    return 'checkbox';
+  }
+
+  if (control.type === 'radio') {
+    return 'radio';
+  }
+
+  if (control.type === 'file') {
+    return 'file';
+  }
+
+  return 'text';
+};
+
+const buildHumanReviewFields = (
+  decisions: FormMappingDecision[],
+  controls: ExtractedFormControl[]
+) =>
+  decisions.slice(0, 10).map(decision => {
+    const control = controls.find(item => item.index === decision.controlIndex);
+    return {
+      controlIndex: decision.controlIndex,
+      question: getControlQuestion(control),
+      controlKind: getSavedAnswerControlKind(control),
+      safetyCategory: decision.humanReviewCategory || 'uncertain',
+      reason: compactText(decision.reason, 500),
+      source: decision.source,
+      savedFormAnswerId: decision.savedFormAnswerId
+    };
+  });
+
+const buildSavedAnswerSuggestions = (
+  decisions: FormMappingDecision[],
+  controls: ExtractedFormControl[]
+) =>
+  decisions
+    .filter(decision => decision.source === 'saved_answer')
+    .slice(0, 10)
+    .map(decision => {
+      const control = controls.find(item => item.index === decision.controlIndex);
+      return {
+        controlIndex: decision.controlIndex,
+        question: getControlQuestion(control),
+        controlKind: getSavedAnswerControlKind(control),
+        answer: decision.value || '',
+        safetyCategory: 'safe',
+        savedFormAnswerId: decision.savedFormAnswerId,
+        reason: compactText(decision.reason, 500)
+      };
+    });
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === 'object' && !Array.isArray(value));
+
+const readApprovedHumanAnswers = (
+  resolutionMessage: string | undefined
+): ApprovedHumanAnswer[] => {
+  if (!resolutionMessage) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(resolutionMessage);
+    if (!isRecord(parsed) || !Array.isArray(parsed.approvedAnswers)) {
+      return [];
+    }
+
+    return parsed.approvedAnswers.filter(isRecord).flatMap(answer => {
+      const controlIndex = answer.controlIndex;
+      const value = answer.answer;
+      if (typeof controlIndex !== 'number' || typeof value !== 'string' || !value.trim()) {
+        return [];
+      }
+
+      return [
+        {
+          controlIndex,
+          question: typeof answer.question === 'string' ? answer.question : '',
+          answer: value.trim(),
+          controlKind: typeof answer.controlKind === 'string' ? answer.controlKind : undefined,
+          safetyCategory:
+            typeof answer.safetyCategory === 'string' ? answer.safetyCategory : undefined,
+          savedFormAnswerId:
+            typeof answer.savedFormAnswerId === 'string' ? answer.savedFormAnswerId : undefined
+        }
+      ];
+    });
+  } catch {
+    return [];
+  }
+};
 
 const mapHumanCategoryToReason = (
   category: FormHumanReviewCategory | undefined
@@ -678,7 +814,9 @@ const applyMappedDecision = async (
   switch (decision.action) {
     case 'fill':
       await locator.fill(decision.value || '');
-      return `Filled ${decision.fieldKey || 'field'} with safe profile data.`;
+      return decision.source === 'saved_answer'
+        ? `Filled ${decision.fieldKey || 'field'} with an approved answer.`
+        : `Filled ${decision.fieldKey || 'field'} with safe profile data.`;
     case 'select':
       try {
         await locator.selectOption({ label: decision.value || '' });
@@ -700,6 +838,78 @@ const applyMappedDecision = async (
   }
 };
 
+const actionForApprovedAnswer = (
+  control: ExtractedFormControl,
+  answer: string
+): FormMappingDecision['action'] | undefined => {
+  if (control.tag === 'select') {
+    return 'select';
+  }
+
+  if (control.type === 'checkbox') {
+    if (TRUE_PATTERN.test(answer.trim())) {
+      return 'check';
+    }
+    if (FALSE_PATTERN.test(answer.trim())) {
+      return 'uncheck';
+    }
+    return undefined;
+  }
+
+  if (control.type === 'radio') {
+    return 'check';
+  }
+
+  if (control.type === 'file') {
+    return undefined;
+  }
+
+  return 'fill';
+};
+
+const applyApprovedHumanAnswers = async (
+  page: Page,
+  controls: ExtractedFormControl[],
+  approvedAnswers: ApprovedHumanAnswer[],
+  resumeUploadPayload: ResumeUploadPayload
+): Promise<string[]> => {
+  const appliedMessages: string[] = [];
+
+  for (const approvedAnswer of approvedAnswers) {
+    const control = controls.find(item => item.index === approvedAnswer.controlIndex);
+    if (!control) {
+      continue;
+    }
+
+    const action = actionForApprovedAnswer(control, approvedAnswer.answer);
+    if (!action) {
+      continue;
+    }
+
+    const decision: FormMappingDecision = {
+      controlIndex: control.index,
+      status: 'MAP',
+      action,
+      source: 'saved_answer',
+      confidence: 'high',
+      fieldKey: 'savedAnswer',
+      value: approvedAnswer.answer,
+      selectorHint: control.selectorHints[0],
+      reason: `Used answer approved during human intervention for "${compactText(
+        approvedAnswer.question || getControlQuestion(control),
+        120
+      )}".`,
+      humanReviewCategory: 'uncertain',
+      savedFormAnswerId: approvedAnswer.savedFormAnswerId
+    };
+
+    const message = await applyMappedDecision(page, control, decision, resumeUploadPayload);
+    appliedMessages.push(message);
+  }
+
+  return appliedMessages;
+};
+
 const clickButton = async (page: Page, button: ButtonCandidate): Promise<void> => {
   const locator = page.locator(button.selector).first();
   if ((await locator.count()) === 0) {
@@ -718,6 +928,7 @@ const waitForIntervention = async (options: {
   screenshot?: ApplicationAdapterArtifact;
   snapshotArtifact?: { filePath: string; url: string };
   artifactUrls?: Array<{ filePath: string; url: string }>;
+  metadata?: Record<string, unknown>;
   logs: string[];
   readyForReviewOnTimeout?: boolean;
 }): Promise<InterventionOutcome> => {
@@ -754,7 +965,8 @@ const waitForIntervention = async (options: {
       jobUrl: options.context.job.url,
       step: options.step,
       adapterId: 'generic',
-      artifactUrls: options.artifactUrls || []
+      artifactUrls: options.artifactUrls || [],
+      ...(options.metadata || {})
     }
   });
 
@@ -784,7 +996,8 @@ const waitForIntervention = async (options: {
     ) {
       return {
         resolution: resolution.status,
-        interventionId: intervention.id
+        interventionId: intervention.id,
+        approvedAnswers: readApprovedHumanAnswers(resolution.resolutionMessage)
       };
     }
   } catch (error) {
@@ -805,7 +1018,8 @@ const waitForIntervention = async (options: {
 
   return {
     resolution: 'pending',
-    interventionId: intervention.id
+    interventionId: intervention.id,
+    approvedAnswers: []
   };
 };
 
@@ -1050,10 +1264,30 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
             diagnostics.htmlArtifact,
             diagnostics.textArtifact
           ],
+          metadata: {
+            humanReviewFields: buildHumanReviewFields(
+              unresolvedHumanDecisions,
+              snapshot.controls.controls
+            ),
+            savedAnswerSuggestions: buildSavedAnswerSuggestions(
+              mapping.mapped,
+              snapshot.controls.controls
+            )
+          },
           logs
         });
 
         if (intervention.resolution === 'continued') {
+          const appliedHumanAnswers = await applyApprovedHumanAnswers(
+            currentPage,
+            snapshot.controls.controls,
+            intervention.approvedAnswers,
+            resumeUploadPayload
+          );
+          if (appliedHumanAnswers.length > 0) {
+            logs.push(...appliedHumanAnswers.map(text => `Step ${step}: ${text}`));
+            await settlePage(currentPage);
+          }
           logs.push('Continuing after manual field review.');
           continue;
         }
@@ -1100,6 +1334,12 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
               diagnostics.htmlArtifact,
               diagnostics.textArtifact
             ],
+            metadata: {
+              savedAnswerSuggestions: buildSavedAnswerSuggestions(
+                mapping.mapped,
+                snapshot.controls.controls
+              )
+            },
             logs,
             readyForReviewOnTimeout: true
           });

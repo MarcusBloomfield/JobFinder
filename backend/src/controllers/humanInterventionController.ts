@@ -61,14 +61,24 @@ const getInterventionId = (req: Request): string | undefined => {
 };
 
 const getResolutionMessage = (req: Request): string | undefined => {
-  const { message, note, response } = req.body as {
+  const { message, note, response, approvedAnswers } = req.body as {
     message?: unknown;
     note?: unknown;
     response?: unknown;
+    approvedAnswers?: unknown;
   };
   const candidate = message ?? note ?? response;
+  const resolutionMessage =
+    typeof candidate === 'string' && candidate.trim() ? candidate.trim() : undefined;
 
-  return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : undefined;
+  if (Array.isArray(approvedAnswers)) {
+    return JSON.stringify({
+      message: resolutionMessage,
+      approvedAnswers
+    });
+  }
+
+  return resolutionMessage;
 };
 
 const sendMissingIntervention = (res: Response) =>

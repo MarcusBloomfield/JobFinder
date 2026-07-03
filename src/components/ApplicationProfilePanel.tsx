@@ -2,6 +2,7 @@ import React from 'react';
 import { ApplicationProfile } from '../models/ApplicationProfile';
 import { TrackedJobApplication } from '../models/ApplicationTracking';
 import { Resume } from '../models/Resume';
+import SavedFormAnswersManager from './SavedFormAnswersManager';
 
 interface ApplicationProfilePanelProps {
   profile: ApplicationProfile;
@@ -293,6 +294,8 @@ const ApplicationProfilePanel: React.FC<ApplicationProfilePanelProps> = ({
           </label>
         </div>
       </section>
+
+      <SavedFormAnswersManager />
 
       <section className="application-profile-section">
         <div className="application-profile-header">

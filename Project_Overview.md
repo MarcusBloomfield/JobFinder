@@ -12,6 +12,8 @@
 
 - Human intervention handoffs are handled by `src/components/HumanInterventionPanel.tsx`.
 - The component is mounted globally in `src/App.tsx`, polls `/api/interventions/pending`, and opens a modal dialog only when pending handoffs exist.
+- Human intervention handoffs can show repeated-question saved-answer suggestions, collect approved answers, apply them to the live generic adapter page on Continue, and optionally save them for future reuse. Sensitive categories are stored as manual-approval-only and cannot be marked for automatic reuse from the UI.
+- Saved application answers are managed on the Profile page through `src/components/SavedFormAnswersManager.tsx`, backed by `/api/saved-form-answers`.
 - The old inline Progress-page handoff panel was removed; resolving a handoff refreshes application tracking.
 - Auto-apply now has an optional distance limit in the Profile page. The user sets a home address/current location plus max kilometres; manual and bulk auto-apply skip jobs outside that range or jobs whose location cannot be resolved.
 - OpenAI-backed LLM features default to `gpt-5.4`; environment variables such as `APPLY_AGENT_MODEL`, `COVER_LETTER_MODEL`, and `PROFILE_FILL_MODEL` can still override specific flows.
