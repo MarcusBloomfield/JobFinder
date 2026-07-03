@@ -35,6 +35,21 @@ if (!registeredIndeedAdapter || registeredIndeedAdapter.platform !== 'indeed') {
   failures.push('registered adapters: expected indeed adapter registration');
 }
 
+const employmentHeroUrlAdapter = getApplicationAdapterForUrl('https://jobs.swagapp.com/jobs/123');
+if (employmentHeroUrlAdapter.id !== 'employmenthero') {
+  failures.push(`Employment Hero URL: expected employmenthero, got ${employmentHeroUrlAdapter.id}`);
+}
+if (employmentHeroUrlAdapter.canAutoSubmit) {
+  failures.push('employmenthero adapter: expected canAutoSubmit=false for final-review handoff');
+}
+
+const registeredEmploymentHeroAdapter = getRegisteredApplicationAdapters().find(
+  adapter => adapter.id === 'employmenthero'
+);
+if (!registeredEmploymentHeroAdapter || registeredEmploymentHeroAdapter.platform !== 'employmenthero') {
+  failures.push('registered adapters: expected Employment Hero adapter registration');
+}
+
 const greenhouseUrlAdapter = getApplicationAdapterForUrl('https://boards.greenhouse.io/acme/jobs/123');
 if (greenhouseUrlAdapter.id !== 'generic') {
   failures.push(`greenhouse URL: expected generic, got ${greenhouseUrlAdapter.id}`);

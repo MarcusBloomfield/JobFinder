@@ -7,11 +7,13 @@ import {
 } from './types';
 import { seekAdapter } from './seekAdapter';
 import { indeedAdapter } from './indeedAdapter';
+import { employmentHeroAdapter } from './employmentHeroAdapter';
 import { genericAdapter } from './genericAdapter';
 
 export const KNOWN_APPLICATION_PLATFORMS: ApplicationPlatform[] = [
   'seek',
   'indeed',
+  'employmenthero',
   'greenhouse',
   'lever',
   'workday',
@@ -24,17 +26,19 @@ export const KNOWN_APPLICATION_PLATFORMS: ApplicationPlatform[] = [
   'generic'
 ];
 
-export type ApplicationAdapterId = 'seek' | 'indeed' | 'generic';
+export type ApplicationAdapterId = 'seek' | 'indeed' | 'employmenthero' | 'generic';
 
 const ADAPTERS_BY_ID: Record<ApplicationAdapterId, ApplicationAdapter> = {
   seek: seekAdapter,
   indeed: indeedAdapter,
+  employmenthero: employmentHeroAdapter,
   generic: genericAdapter
 };
 
 export const PLATFORM_ADAPTER_IDS: Record<ApplicationPlatform, ApplicationAdapterId> = {
   seek: 'seek',
   indeed: 'indeed',
+  employmenthero: 'employmenthero',
   greenhouse: 'generic',
   lever: 'generic',
   workday: 'generic',
@@ -50,6 +54,7 @@ export const PLATFORM_ADAPTER_IDS: Record<ApplicationPlatform, ApplicationAdapte
 export const getRegisteredApplicationAdapters = (): ApplicationAdapter[] => [
   seekAdapter,
   indeedAdapter,
+  employmentHeroAdapter,
   genericAdapter
 ];
 
