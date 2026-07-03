@@ -31,6 +31,7 @@ import {
   FormMappingResult,
   FORM_MAPPING_SERVICE_VERSION
 } from '../formMappingService';
+import { ApplicationPlatform } from '../applicationPlatformService';
 import {
   ApplicationAdapter,
   ApplicationAdapterArtifact,
@@ -57,7 +58,6 @@ const ARTIFACTS_BASE_URL =
   `http://localhost:${process.env.PORT || 5000}/artifacts`;
 const PLAYWRIGHT_DIR = path.resolve(__dirname, '../../../.playwright');
 const APPLICATION_RUNS_DIR = path.join(PLAYWRIGHT_DIR, 'application-runs');
-const GENERIC_PROFILE_DIR = path.join(PLAYWRIGHT_DIR, 'generic-profile');
 const UPLOADS_DIR = path.resolve(__dirname, '../../../uploads');
 
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
@@ -66,14 +66,16 @@ const URL_PATTERN = /\bhttps?:\/\/[^\s]+/gi;
 const SUBMISSION_TEXT_PATTERN =
   /\b(application submitted|application received|thank you for applying|your application has been submitted)\b/i;
 const CAPTCHA_PATTERN = /\b(captcha|recaptcha|hcaptcha|i am human|not a robot)\b/i;
-const LOGIN_TEXT_PATTERN =
-  /\b(log in|login|sign in|sign-in|password|continue with google|continue with microsoft|create account)\b/i;
+const LOGIN_PAGE_TEXT_PATTERN =
+  /\b(sign in to apply|log in to apply|login to apply|sign in or create an account|log in or create an account|create an account to continue|indeed account)\b/i;
+const LOGIN_BUTTON_TEXT_PATTERN =
+  /^(log in|login|sign in|sign-in|sign in to apply|continue with google|continue with microsoft|continue with apple|continue with facebook|create account|create an account)$/i;
 const VERIFICATION_TEXT_PATTERN =
   /\b(verification code|verify your email|verify your identity|two-factor|2fa|otp|one-time password|authenticator|sms code)\b/i;
 const NEXT_BUTTON_PATTERN =
-  /^(continue|next|save and continue|review|review application|continue application|proceed|apply now|continue to application)$/i;
+  /^(continue|next|save and continue|review|review application|continue application|proceed|apply now|continue to application|apply with (?:your )?indeed resume|use (?:your )?indeed resume)$/i;
 const FINAL_SUBMIT_BUTTON_PATTERN =
-  /^(submit|submit application|send application|complete application|finish application|confirm application|apply)$/i;
+  /^(submit|submit application|submit your application|send application|complete application|finish application|confirm application|apply)$/i;
 const REVIEW_BUTTON_PATTERN = /^(review|review application|preview|preview application)$/i;
 const TRUE_PATTERN = /^(true|yes|y|1|checked|check|on|agree|agreed|accept|accepted)$/i;
 const FALSE_PATTERN = /^(false|no|n|0|unchecked|uncheck|off)$/i;
@@ -113,6 +115,116 @@ interface ApprovedHumanAnswer {
   safetyCategory?: string;
   savedFormAnswerId?: string;
 }
+
+export interface GenericFormAdapterConfig {
+  id: string;
+  displayName: string;
+  platform: ApplicationPlatform;
+  supportedPlatforms: ApplicationPlatform[];
+  profileDirName: string;
+  stepLimitLabel?: string;
+  failureMessage?: string;
+  coverLetterManualMessage?: string;
+  forceFinalReview?: boolean;
+}
+
+type GenericFormAdapterRuntimeConfig = Pick<
+  GenericFormAdapterConfig,
+  | 'id'
+  | 'displayName'
+  | 'profileDirName'
+  | 'stepLimitLabel'
+  | 'failureMessage'
+  | 'coverLetterManualMessage'
+  | 'forceFinalReview'
+>;
+
+const GENERIC_FORM_ADAPTER_METADATA_KEY = 'genericFormAdapterConfig';
+
+const DEFAULT_GENERIC_FORM_ADAPTER_CONFIG: GenericFormAdapterConfig = {
+  id: 'generic',
+  displayName: 'Generic application flow',
+  platform: 'generic',
+  supportedPlatforms: [
+    'greenhouse',
+    'lever',
+    'workday',
+    'smartrecruiters',
+    'bamboohr',
+    'ashby',
+    'pageup',
+    'successfactors',
+    'taleo',
+    'generic'
+  ],
+  profileDirName: 'generic-profile',
+  stepLimitLabel: 'generic adapter',
+  failureMessage: 'Generic adapter failed.',
+  coverLetterManualMessage:
+    'Cover-letter upload was detected and requires manual handling in generic adapter V1.',
+  forceFinalReview: false
+};
+
+const isRuntimeConfigRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === 'object' && !Array.isArray(value));
+
+const readRuntimeText = (
+  runtimeConfig: Record<string, unknown> | undefined,
+  key: keyof GenericFormAdapterRuntimeConfig,
+  fallback: string
+): string => {
+  const value = runtimeConfig?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+};
+
+const readRuntimeBoolean = (
+  runtimeConfig: Record<string, unknown> | undefined,
+  key: keyof GenericFormAdapterRuntimeConfig,
+  fallback: boolean
+): boolean => {
+  const value = runtimeConfig?.[key];
+  return typeof value === 'boolean' ? value : fallback;
+};
+
+const getRuntimeConfig = (context: ApplicationContext): Required<GenericFormAdapterRuntimeConfig> => {
+  const runtimeConfig = context.metadata?.[GENERIC_FORM_ADAPTER_METADATA_KEY];
+  const record = isRuntimeConfigRecord(runtimeConfig) ? runtimeConfig : undefined;
+
+  return {
+    id: readRuntimeText(record, 'id', DEFAULT_GENERIC_FORM_ADAPTER_CONFIG.id),
+    displayName: readRuntimeText(
+      record,
+      'displayName',
+      DEFAULT_GENERIC_FORM_ADAPTER_CONFIG.displayName
+    ),
+    profileDirName: readRuntimeText(
+      record,
+      'profileDirName',
+      DEFAULT_GENERIC_FORM_ADAPTER_CONFIG.profileDirName
+    ),
+    stepLimitLabel: readRuntimeText(
+      record,
+      'stepLimitLabel',
+      DEFAULT_GENERIC_FORM_ADAPTER_CONFIG.stepLimitLabel || 'generic adapter'
+    ),
+    failureMessage: readRuntimeText(
+      record,
+      'failureMessage',
+      DEFAULT_GENERIC_FORM_ADAPTER_CONFIG.failureMessage || 'Generic adapter failed.'
+    ),
+    coverLetterManualMessage: readRuntimeText(
+      record,
+      'coverLetterManualMessage',
+      DEFAULT_GENERIC_FORM_ADAPTER_CONFIG.coverLetterManualMessage ||
+        'Cover-letter upload was detected and requires manual handling in generic adapter V1.'
+    ),
+    forceFinalReview: readRuntimeBoolean(
+      record,
+      'forceFinalReview',
+      Boolean(DEFAULT_GENERIC_FORM_ADAPTER_CONFIG.forceFinalReview)
+    )
+  };
+};
 
 const slugify = (value: string): string =>
   value
@@ -252,10 +364,14 @@ const settlePage = async (page: Page): Promise<void> => {
   await page.waitForTimeout(500);
 };
 
-const openGenericBrowser = async (jobUrl: string): Promise<BrowserContext> => {
-  fs.mkdirSync(GENERIC_PROFILE_DIR, { recursive: true });
+const openGenericBrowser = async (
+  jobUrl: string,
+  profileDirName: string
+): Promise<BrowserContext> => {
+  const profileDir = path.join(PLAYWRIGHT_DIR, profileDirName);
+  fs.mkdirSync(profileDir, { recursive: true });
   const headless = shouldRunHeadless();
-  const context = await chromium.launchPersistentContext(GENERIC_PROFILE_DIR, {
+  const context = await chromium.launchPersistentContext(profileDir, {
     channel: getBrowserChannel(),
     headless,
     slowMo: getSlowMo(headless),
@@ -704,7 +820,8 @@ const findBlockingReason = (
 
   if (
     hasPasswordField ||
-    LOGIN_TEXT_PATTERN.test(pageText) ||
+    LOGIN_PAGE_TEXT_PATTERN.test(pageText) ||
+    snapshot.buttons.some(button => LOGIN_BUTTON_TEXT_PATTERN.test(button.text)) ||
     snapshot.url.toLowerCase().includes('/login')
   ) {
     return {
@@ -945,11 +1062,12 @@ const waitForIntervention = async (options: {
       });
     } catch (error) {
       console.warn(
-        'Failed to mark generic run waiting for user:',
+        `Failed to mark ${getRuntimeConfig(options.context).displayName} run waiting for user:`,
         error instanceof Error ? error.message : error
       );
     }
   }
+  const adapterConfig = getRuntimeConfig(options.context);
 
   const intervention = createHumanIntervention({
     applicationId: options.context.applicationId,
@@ -964,7 +1082,8 @@ const waitForIntervention = async (options: {
       jobId: options.context.job.id,
       jobUrl: options.context.job.url,
       step: options.step,
-      adapterId: 'generic',
+      adapterId: adapterConfig.id,
+      adapterName: adapterConfig.displayName,
       artifactUrls: options.artifactUrls || [],
       ...(options.metadata || {})
     }
@@ -1033,30 +1152,35 @@ const buildResult = (
   steps: number,
   artifacts: ApplicationAdapterArtifact[],
   metadata?: Record<string, unknown>
-): ApplicationResult => ({
-  status,
-  message,
-  logs,
-  finalUrl,
-  steps,
-  artifacts,
-  applicationSnapshot: buildApplicationSnapshot(context.job, resume),
-  metadata: {
-    adapterId: 'generic',
-    platform: context.platform,
-    formExtraction: {
-      service: 'formExtractionService',
-      version: FORM_EXTRACTION_SERVICE_VERSION,
-      ready: true
-    },
-    formMapping: {
-      service: 'formMappingService',
-      version: FORM_MAPPING_SERVICE_VERSION,
-      ready: true
-    },
-    ...metadata
-  }
-});
+): ApplicationResult => {
+  const adapterConfig = getRuntimeConfig(context);
+
+  return {
+    status,
+    message,
+    logs,
+    finalUrl,
+    steps,
+    artifacts,
+    applicationSnapshot: buildApplicationSnapshot(context.job, resume),
+    metadata: {
+      adapterId: adapterConfig.id,
+      adapterName: adapterConfig.displayName,
+      platform: context.platform,
+      formExtraction: {
+        service: 'formExtractionService',
+        version: FORM_EXTRACTION_SERVICE_VERSION,
+        ready: true
+      },
+      formMapping: {
+        service: 'formMappingService',
+        version: FORM_MAPPING_SERVICE_VERSION,
+        ready: true
+      },
+      ...metadata
+    }
+  };
+};
 
 const finishSkipOrFail = (
   context: ApplicationContext,
@@ -1080,21 +1204,22 @@ const finishSkipOrFail = (
   );
 
 const applyGeneric = async (context: ApplicationContext): Promise<ApplicationResult> => {
+  const adapterConfig = getRuntimeConfig(context);
   const logs: string[] = [
-    `Generic adapter started for platform "${context.platform}".`,
+    `${adapterConfig.displayName} adapter started for platform "${context.platform}".`,
     `Target URL: ${context.job.url}`
   ];
   const artifacts: ApplicationAdapterArtifact[] = [];
   const runArtifactsDir = createRunArtifactsDir(context.job.url, context.applicationRunId);
   const effectiveProfile = buildEffectiveProfile(context.resume, context.applicationProfile);
   const resumeUploadPayload = getResumeUploadPayload(context.resume);
-  const requireFinalReview = context.requireFinalReview !== false;
+  const requireFinalReview = adapterConfig.forceFinalReview || context.requireFinalReview !== false;
   let contextBrowser: BrowserContext | undefined;
   let currentPage: Page | undefined;
   let lastUrl = context.job.url;
 
   try {
-    contextBrowser = await openGenericBrowser(context.job.url);
+    contextBrowser = await openGenericBrowser(context.job.url, adapterConfig.profileDirName);
     currentPage = contextBrowser.pages()[0] || (await contextBrowser.newPage());
     lastUrl = currentPage.url();
 
@@ -1235,9 +1360,7 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
         ...coverLetterUploadDecisions.map(decision => ({
           ...decision,
           status: 'NEEDS_HUMAN' as const,
-          reason:
-            decision.reason ||
-            'Cover-letter upload was detected and requires manual handling in generic adapter V1.',
+          reason: decision.reason || adapterConfig.coverLetterManualMessage,
           humanReviewCategory: decision.humanReviewCategory || 'unsupported'
         }))
       ];
@@ -1436,7 +1559,7 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
       );
     }
 
-    const message = `Reached the maximum of ${MAX_AGENT_STEPS} generic adapter steps before submission.`;
+    const message = `Reached the maximum of ${MAX_AGENT_STEPS} ${adapterConfig.stepLimitLabel} steps before submission.`;
     if (context.applicationRunId) {
       markApplicationRunReadyForReview(context.applicationRunId, {
         currentStep: MAX_AGENT_STEPS,
@@ -1456,7 +1579,7 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
       artifacts
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Generic adapter failed.';
+    const message = error instanceof Error ? error.message : adapterConfig.failureMessage;
     logs.push(`Failed: ${message}`);
 
     if (context.applicationRunId) {
@@ -1483,23 +1606,32 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
   }
 };
 
-export const genericAdapter: ApplicationAdapter = {
-  id: 'generic',
-  displayName: 'Generic application flow',
-  platform: 'generic',
-  supportedPlatforms: [
-    'indeed',
-    'greenhouse',
-    'lever',
-    'workday',
-    'smartrecruiters',
-    'bamboohr',
-    'ashby',
-    'pageup',
-    'successfactors',
-    'taleo',
-    'generic'
-  ],
+export const createGenericFormAdapter = (
+  config: GenericFormAdapterConfig
+): ApplicationAdapter => ({
+  id: config.id,
+  displayName: config.displayName,
+  platform: config.platform,
+  supportedPlatforms: config.supportedPlatforms,
   canAutoSubmit: false,
-  apply: applyGeneric
-};
+  apply: (context: ApplicationContext): Promise<ApplicationResult> =>
+    applyGeneric({
+      ...context,
+      metadata: {
+        ...(context.metadata || {}),
+        [GENERIC_FORM_ADAPTER_METADATA_KEY]: {
+          id: config.id,
+          displayName: config.displayName,
+          profileDirName: config.profileDirName,
+          stepLimitLabel: config.stepLimitLabel,
+          failureMessage: config.failureMessage,
+          coverLetterManualMessage: config.coverLetterManualMessage,
+          forceFinalReview: Boolean(config.forceFinalReview)
+        }
+      }
+    })
+});
+
+export const genericAdapter: ApplicationAdapter = createGenericFormAdapter(
+  DEFAULT_GENERIC_FORM_ADAPTER_CONFIG
+);

@@ -27,7 +27,7 @@
 - `applicationAgentService.ts` is the apply orchestrator. It creates tracked applications/runs, detects platform, enforces `APPLY_AGENT_ALLOWED_PLATFORMS`, selects the adapter, passes `APPLY_AGENT_REQUIRE_FINAL_REVIEW`, maps adapter statuses back to frontend-compatible results, and finalizes tracking.
 - Auto-apply now defaults `APPLY_AGENT_REQUIRE_FINAL_REVIEW` to false when unset. The SEEK LLM should only create `review_required` handoffs when automation cannot continue, such as captcha, MFA/login, unsupported legal declarations, or missing required information.
 - Fully automatic apply has a user-selectable match percentage threshold in the job list header. The value is saved in browser local storage under `jobfinder.autoApplyMatchThreshold` and defaults to the previous 60% cutoff.
-- Application adapter contracts live in `backend/src/services/applicationAdapters/types.ts`. The registry in `applicationAdapters/adapterRegistry.ts` currently registers `seek` and `generic`; unsupported known ATS platforms route to `generic` until dedicated adapters are added.
+- Application adapter contracts live in `backend/src/services/applicationAdapters/types.ts`. The registry in `applicationAdapters/adapterRegistry.ts` currently registers `seek`, `indeed`, and `generic`; unsupported known ATS platforms route to `generic` until dedicated adapters are added. Indeed uses `indeedAdapter.ts`, an Indeed-profile safe form adapter for login/CAPTCHA handoff, resume upload, profile fields, question pages, sensitive/unknown question review, and forced final-review pause before submit.
 
 ---
 
