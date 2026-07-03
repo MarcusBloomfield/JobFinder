@@ -16,11 +16,13 @@ import {
 import { detectPlatform, ApplicationPlatform } from './applicationPlatformService';
 import {
   createApplicationRun,
+  getApplicationRunById,
   markApplicationRunFailed,
   markApplicationRunReadyForReview,
   markApplicationRunSkipped,
   markApplicationRunSubmitted,
-  markApplicationRunWaitingForUser
+  markApplicationRunWaitingForUser,
+  updateApplicationRun
 } from './applicationRunTrackingService';
 import {
   ApplicationTriggerSource,
@@ -248,6 +250,51 @@ const buildSkippedAdapterResult = (
   applicationSnapshot: buildApplicationSnapshot(job, resume)
 });
 
+const getStringMetadata = (
+  metadata: Record<string, unknown> | undefined,
+  key: string
+): string | undefined => {
+  const value = metadata?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+};
+
+export const getGenericHandoffUrl = (result: ApplicationResult): string | undefined => {
+  if (result.metadata?.handoffToGenericAdapter !== true) {
+    return undefined;
+  }
+
+  const handoffUrl = getStringMetadata(result.metadata, 'handoffUrl') || result.finalUrl;
+  try {
+    const parsed = new URL(handoffUrl);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+      ? parsed.toString()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+export const isGenericHandoffAllowed = (
+  allowedPlatforms: Set<ApplicationPlatform> | null,
+  targetPlatform: ApplicationPlatform
+): boolean =>
+  !allowedPlatforms || allowedPlatforms.has('generic') || allowedPlatforms.has(targetPlatform);
+
+export const getResultPlatform = (
+  result: ApplicationResult,
+  fallback: ApplicationPlatform
+): ApplicationPlatform => {
+  const platform = result.metadata?.platform;
+  if (typeof platform === 'string' && isKnownApplicationPlatform(platform)) {
+    return platform;
+  }
+
+  const handoffPlatform = result.metadata?.handoffPlatform;
+  return typeof handoffPlatform === 'string' && isKnownApplicationPlatform(handoffPlatform)
+    ? handoffPlatform
+    : fallback;
+};
+
 const getBrowserChannel = (): 'chrome' | 'msedge' | undefined => {
   const configured = process.env.PLAYWRIGHT_BROWSER_CHANNEL?.toLowerCase();
 
@@ -430,14 +477,102 @@ export const applyToJob = async (
           aiModel
         }
       });
+
+      const handoffUrl = getGenericHandoffUrl(result);
+      if (handoffUrl) {
+        const handoffPlatform = detectPlatform(handoffUrl);
+        const genericAdapter = getApplicationAdapterForPlatform('generic');
+        const handoffSourceAdapter =
+          getStringMetadata(result.metadata, 'handoffSourceAdapter') || adapter.id;
+
+        if (!isGenericHandoffAllowed(allowedPlatforms, handoffPlatform)) {
+          result = {
+            ...result,
+            status: 'skipped',
+            message: `Skipped external application website because platform "${handoffPlatform}" is not allowed by APPLY_AGENT_ALLOWED_PLATFORMS.`,
+            finalUrl: handoffUrl,
+            logs: [
+              ...result.logs,
+              `External handoff URL: ${handoffUrl}.`,
+              `Detected handoff platform: ${handoffPlatform}.`,
+              'Generic adapter handoff was skipped before browser automation.'
+            ],
+            metadata: {
+              ...(result.metadata || {}),
+              handoffBlocked: true,
+              handoffPlatform,
+              handoffUrl
+            }
+          };
+        } else {
+          const existingRunMetadata = getApplicationRunById(applicationRun.id)?.metadata || {};
+          updateApplicationRun(applicationRun.id, {
+            status: 'running',
+            platform: handoffPlatform,
+            currentUrl: handoffUrl,
+            errorMessage: '',
+            errorStack: '',
+            metadata: {
+              ...existingRunMetadata,
+              adapter: genericAdapter.id,
+              adapterName: genericAdapter.displayName,
+              handoffFromAdapter: handoffSourceAdapter,
+              handoffUrl,
+              originalJobUrl: job.url,
+              triggerSource,
+              requireFinalReview,
+              aiModel
+            }
+          });
+
+          const genericResult = await genericAdapter.apply({
+            job: {
+              ...job,
+              url: handoffUrl
+            },
+            resume,
+            applicationProfile,
+            applicationId: trackedApplication.id,
+            applicationRunId: applicationRun.id,
+            platform: handoffPlatform,
+            requireFinalReview,
+            metadata: {
+              triggerSource,
+              requireFinalReview,
+              aiModel,
+              originalJobUrl: job.url,
+              handoffFromAdapter: handoffSourceAdapter,
+              handoffUrl
+            }
+          });
+
+          result = {
+            ...genericResult,
+            logs: [
+              ...result.logs,
+              `Handed off from ${handoffSourceAdapter} adapter to generic adapter at ${handoffUrl}.`,
+              ...genericResult.logs
+            ],
+            steps: result.steps + genericResult.steps,
+            artifacts: [...result.artifacts, ...genericResult.artifacts],
+            metadata: {
+              ...(genericResult.metadata || {}),
+              handoffFromAdapter: handoffSourceAdapter,
+              handoffUrl,
+              originalJobUrl: job.url
+            }
+          };
+        }
+      }
     }
 
     markRunFromAdapterResult(applicationRun.id, result);
+    const resultPlatform = getResultPlatform(result, platform);
     const mappedResult = mapAdapterResult(job, resume, result, {
       trackingId: trackedApplication.id,
       runId: applicationRun.id,
-      platform,
-      adapterId: adapter.id
+      platform: resultPlatform,
+      adapterId: getStringMetadata(result.metadata, 'adapterId') || adapter.id
     });
     finalizeTrackedApplication(trackedApplication.id, mappedResult);
     return mappedResult;

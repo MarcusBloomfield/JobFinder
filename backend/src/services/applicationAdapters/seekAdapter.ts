@@ -42,8 +42,9 @@ const MAX_COVER_LETTER_EXAMPLE_CHARS = Number(
 );
 const APPLY_AGENT_REASONING_EFFORT: 'medium' = 'medium';
 const APPLY_AGENT_TIMEOUT_MS = Number(process.env.APPLY_AGENT_TIMEOUT_MS || 55000);
-const ALLOW_EXTERNAL_WEBSITE_AUTOMATION =
-  process.env.APPLY_AGENT_ALLOW_EXTERNAL_WEBSITES?.trim().toLowerCase() === 'true';
+const BLOCK_EXTERNAL_WEBSITE_HANDOFF =
+  process.env.APPLY_AGENT_BLOCK_EXTERNAL_WEBSITES?.trim().toLowerCase() === 'true' ||
+  process.env.APPLY_AGENT_ALLOW_EXTERNAL_WEBSITES?.trim().toLowerCase() === 'false';
 const UPLOADS_DIR = path.resolve(__dirname, '../../../uploads');
 const PLAYWRIGHT_DIR = path.resolve(__dirname, '../../../.playwright');
 const PLAYWRIGHT_PROFILE_DIR = path.join(PLAYWRIGHT_DIR, 'seek-profile');
@@ -402,6 +403,7 @@ export interface JobApplicationResult {
   steps: number;
   artifacts: ApplicationArtifact[];
   applicationSnapshot: ApplicationSnapshot;
+  metadata?: Record<string, unknown>;
 }
 
 class ExternalWebsiteBlockedError extends Error {
@@ -409,11 +411,23 @@ class ExternalWebsiteBlockedError extends Error {
 
   constructor(blockedUrl: string) {
     super(
-      `Skipped auto-apply because the application moved to an external website: ${blockedUrl}. ` +
-        'Set APPLY_AGENT_ALLOW_EXTERNAL_WEBSITES=true to allow it again.'
+      `Skipped auto-apply because external website handoff is blocked: ${blockedUrl}. ` +
+        'Unset APPLY_AGENT_BLOCK_EXTERNAL_WEBSITES or set APPLY_AGENT_ALLOW_EXTERNAL_WEBSITES=true to allow generic adapter handoff.'
     );
     this.name = 'ExternalWebsiteBlockedError';
     this.blockedUrl = blockedUrl;
+  }
+}
+
+class ExternalWebsiteHandoffError extends Error {
+  externalUrl: string;
+
+  constructor(externalUrl: string) {
+    super(
+      `Application moved to an external website and will continue with the generic adapter: ${externalUrl}.`
+    );
+    this.name = 'ExternalWebsiteHandoffError';
+    this.externalUrl = externalUrl;
   }
 }
 
@@ -3276,10 +3290,6 @@ const getDomainFamily = (url: string): string => {
 };
 
 const isAllowedAutomationUrl = (url: string): boolean => {
-  if (ALLOW_EXTERNAL_WEBSITE_AUTOMATION) {
-    return true;
-  }
-
   const domainFamily = getDomainFamily(url);
   if (!domainFamily) {
     return true;
@@ -3290,12 +3300,18 @@ const isAllowedAutomationUrl = (url: string): boolean => {
 
 const ensureAllowedAutomationUrl = (url: string): void => {
   if (!isAllowedAutomationUrl(url)) {
-    throw new ExternalWebsiteBlockedError(url);
+    if (BLOCK_EXTERNAL_WEBSITE_HANDOFF) {
+      throw new ExternalWebsiteBlockedError(url);
+    }
+    throw new ExternalWebsiteHandoffError(url);
   }
 };
 
 const isExternalWebsiteBlockedError = (error: unknown): error is ExternalWebsiteBlockedError =>
   error instanceof ExternalWebsiteBlockedError;
+
+const isExternalWebsiteHandoffError = (error: unknown): error is ExternalWebsiteHandoffError =>
+  error instanceof ExternalWebsiteHandoffError;
 
 const completeInteractivePageAction = async (
   currentPage: Page,
@@ -5001,6 +5017,8 @@ export const applyToJob = async (
           );
         } catch (error) {
           const blockedExternalWebsite = isExternalWebsiteBlockedError(error);
+          const externalWebsiteHandoff = isExternalWebsiteHandoffError(error);
+          const externalWebsiteTransition = blockedExternalWebsite || externalWebsiteHandoff;
           const message = error instanceof Error ? error.message : 'Unknown step error';
           let capturedErrorArtifact: ApplicationArtifact | undefined;
           try {
@@ -5008,8 +5026,8 @@ export const applyToJob = async (
               currentPage,
               runArtifactsDir,
               step,
-              blockedExternalWebsite
-                ? `step-${step}-attempt-${attempt}-skipped-external`
+              externalWebsiteTransition
+                ? `step-${step}-attempt-${attempt}-external-site`
                 : `step-${step}-attempt-${attempt}-error`
             );
             capturedErrorArtifact = errorArtifact;
@@ -5027,8 +5045,8 @@ export const applyToJob = async (
             // Ignore screenshot failures while recovering from the original step error.
           }
 
-          if (blockedExternalWebsite) {
-            logs.push(`${attemptLabel} skipped - ${message}`);
+          if (externalWebsiteTransition) {
+            logs.push(`${attemptLabel} external site - ${message}`);
             let diagnosticSnapshotArtifact: { filePath: string; url: string } | undefined;
             let diagnosticScreenshot: ApplicationArtifact | undefined;
             try {
@@ -5037,7 +5055,7 @@ export const applyToJob = async (
                 page: currentPage,
                 runArtifactsDir,
                 step,
-                label: `step-${step}-attempt-${attempt}-skipped-external`,
+                label: `step-${step}-attempt-${attempt}-external-site`,
                 platform: 'seek',
                 adapterId: 'seek',
                 adapterName: 'Seek adapter',
@@ -5049,18 +5067,36 @@ export const applyToJob = async (
               diagnosticSnapshotArtifact = diagnostics.snapshotArtifact;
               diagnosticScreenshot = diagnostics.screenshot;
             } catch {
-              // Preserve the external-site skip if diagnostic capture also fails.
+              // Preserve the external-site transition if diagnostic capture also fails.
             }
-            markRunSkipped(applicationRunId, {
-              currentStep: step,
-              currentUrl: currentPage.url(),
-              errorMessage: message,
-              errorStack: error instanceof Error ? error.stack : undefined,
-              screenshotFilePath: diagnosticScreenshot?.filePath || artifacts[artifacts.length - 1]?.filePath,
-              screenshotUrl: diagnosticScreenshot?.url || artifacts[artifacts.length - 1]?.url,
-              snapshotFilePath: diagnosticSnapshotArtifact?.filePath,
-              snapshotUrl: diagnosticSnapshotArtifact?.url
-            });
+            if (blockedExternalWebsite) {
+              markRunSkipped(applicationRunId, {
+                currentStep: step,
+                currentUrl: currentPage.url(),
+                errorMessage: message,
+                errorStack: error instanceof Error ? error.stack : undefined,
+                screenshotFilePath:
+                  diagnosticScreenshot?.filePath || artifacts[artifacts.length - 1]?.filePath,
+                screenshotUrl:
+                  diagnosticScreenshot?.url || artifacts[artifacts.length - 1]?.url,
+                snapshotFilePath: diagnosticSnapshotArtifact?.filePath,
+                snapshotUrl: diagnosticSnapshotArtifact?.url
+              });
+            } else {
+              updateRunProgress(applicationRunId, {
+                status: 'running',
+                currentStep: step,
+                currentUrl: currentPage.url(),
+                errorMessage: message,
+                errorStack: error instanceof Error ? error.stack : undefined,
+                screenshotFilePath:
+                  diagnosticScreenshot?.filePath || artifacts[artifacts.length - 1]?.filePath,
+                screenshotUrl:
+                  diagnosticScreenshot?.url || artifacts[artifacts.length - 1]?.url,
+                snapshotFilePath: diagnosticSnapshotArtifact?.filePath,
+                snapshotUrl: diagnosticSnapshotArtifact?.url
+              });
+            }
             throw error;
           }
 
@@ -5181,6 +5217,8 @@ export const applyToJob = async (
     };
   } catch (error) {
     const blockedExternalWebsite = isExternalWebsiteBlockedError(error);
+    const externalWebsiteHandoff = isExternalWebsiteHandoffError(error);
+    const externalUrl = externalWebsiteHandoff ? error.externalUrl : undefined;
     const blockedUrl = blockedExternalWebsite ? error.blockedUrl : undefined;
     const message = error instanceof Error ? error.message : 'Unknown application error';
     let failureArtifact: ApplicationArtifact | undefined;
@@ -5189,13 +5227,15 @@ export const applyToJob = async (
         session.page,
         runArtifactsDir,
         logs.length + 1,
-        blockedExternalWebsite ? 'skipped-external-website' : 'failure-state'
+        blockedExternalWebsite || externalWebsiteHandoff ? 'external-website' : 'failure-state'
       );
       artifacts.push(failureArtifact);
     } catch {
       // Ignore screenshot failures while reporting the original apply error.
     }
-    logs.push(`${blockedExternalWebsite ? 'Skipped' : 'Failed'}: ${message}`);
+    logs.push(
+      `${blockedExternalWebsite ? 'Skipped' : externalWebsiteHandoff ? 'Handing off' : 'Failed'}: ${message}`
+    );
     let finalDiagnosticSnapshotArtifact: { filePath: string; url: string } | undefined;
     let finalDiagnosticScreenshot: ApplicationArtifact | undefined;
     try {
@@ -5204,7 +5244,7 @@ export const applyToJob = async (
         page: session.page,
         runArtifactsDir,
         step: logs.length,
-        label: blockedExternalWebsite ? 'skipped-external-website' : 'failure-state',
+        label: blockedExternalWebsite || externalWebsiteHandoff ? 'external-website' : 'failure-state',
         platform: 'seek',
         adapterId: 'seek',
         adapterName: 'Seek adapter',
@@ -5219,7 +5259,7 @@ export const applyToJob = async (
     }
     const finalRunUpdate = {
       currentStep: logs.length,
-      currentUrl: blockedUrl || lastSnapshot?.url || job.url,
+      currentUrl: externalUrl || blockedUrl || lastSnapshot?.url || job.url,
       errorMessage: message,
       errorStack: error instanceof Error ? error.stack : undefined,
       screenshotFilePath: finalDiagnosticScreenshot?.filePath || failureArtifact?.filePath,
@@ -5229,21 +5269,38 @@ export const applyToJob = async (
     };
     if (blockedExternalWebsite) {
       markRunSkipped(applicationRunId, finalRunUpdate);
+    } else if (externalWebsiteHandoff) {
+      updateRunProgress(applicationRunId, {
+        status: 'running',
+        ...finalRunUpdate,
+        metadata: {
+          seekExternalHandoffUrl: externalUrl,
+          seekExternalHandoffAt: new Date().toISOString()
+        }
+      });
     } else {
       markRunFailed(applicationRunId, finalRunUpdate);
     }
     return {
-      status: blockedExternalWebsite ? 'skipped' : 'failed',
+      status: blockedExternalWebsite || externalWebsiteHandoff ? 'skipped' : 'failed',
       message,
       logs,
-      finalUrl: blockedUrl || lastSnapshot?.url || job.url,
+      finalUrl: externalUrl || blockedUrl || lastSnapshot?.url || job.url,
       steps: logs.length,
       artifacts,
       applicationSnapshot: buildApplicationSnapshotFromOption(job, activeResumeOption, {
         coverLetterText: lastCoverLetterText,
         coverLetterUsed: coverLetterDocumentUploaded,
         coverLetterDocument: lastCoverLetterDocument
-      })
+      }),
+      metadata: externalWebsiteHandoff
+        ? {
+            handoffToGenericAdapter: true,
+            handoffUrl: externalUrl,
+            handoffSourceAdapter: 'seek',
+            handoffReason: 'external_application_site'
+          }
+        : undefined
     };
   } finally {
     await session.context.close();
@@ -5324,7 +5381,8 @@ const mapSeekResult = (result: JobApplicationResult): ApplicationResult => ({
   artifacts: result.artifacts,
   applicationSnapshot: result.applicationSnapshot,
   metadata: {
-    adapterId: 'seek'
+    adapterId: 'seek',
+    ...(result.metadata || {})
   }
 });
 
