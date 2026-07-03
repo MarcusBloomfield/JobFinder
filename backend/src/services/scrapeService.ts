@@ -9,6 +9,7 @@ export const SUPPORTED_JOB_SEARCH_SITES = ['seek', 'linkedin', 'employmenthero']
 export type JobSearchSite = typeof SUPPORTED_JOB_SEARCH_SITES[number];
 
 const PLAYWRIGHT_DIR = path.resolve(__dirname, '../../.playwright');
+const LINKEDIN_SEARCH_SNAPSHOT_DIR = path.join(PLAYWRIGHT_DIR, 'linkedin-search-pages');
 const SITE_PROFILE_DIRS: Record<JobSearchSite, string> = {
   seek: 'seek-profile',
   linkedin: 'linkedin-profile',
@@ -123,6 +124,36 @@ const normalizeMultilineText = (value: string): string =>
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
+const sanitizeSnapshotPart = (value: string): string =>
+  normalizeWhitespace(value)
+    .replace(/[^a-z0-9-]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'linkedin-search';
+
+const saveLinkedInSearchPageSnapshot = async (page: Page, html: string): Promise<void> => {
+  const pageUrl = page.url();
+  if (!pageUrl.includes('linkedin.')) {
+    return;
+  }
+
+  try {
+    await fs.promises.mkdir(LINKEDIN_SEARCH_SNAPSHOT_DIR, { recursive: true });
+    const url = new URL(pageUrl);
+    const keywords = url.searchParams.get('keywords') || 'search';
+    const location = url.searchParams.get('location') || '';
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fileName = `${timestamp}-${sanitizeSnapshotPart(keywords)}-${sanitizeSnapshotPart(location)}.html`;
+    const filePath = path.join(LINKEDIN_SEARCH_SNAPSHOT_DIR, fileName);
+    await fs.promises.writeFile(filePath, html, 'utf8');
+    console.log(`Saved LinkedIn search HTML snapshot: ${filePath}`);
+  } catch (error) {
+    console.warn(
+      'Could not save LinkedIn search HTML snapshot:',
+      error instanceof Error ? error.message : error
+    );
+  }
+};
+
 const getRandomUserAgent = (): string => {
   const userAgents = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
@@ -150,6 +181,17 @@ const getFirstMultilineText = (root: any, selectors: string[]): string => {
     const text = normalizeMultilineText(root.find(selector).first().text());
     if (text) {
       return text;
+    }
+  }
+
+  return '';
+};
+
+const getFirstAttribute = (root: any, selectors: string[], attribute: string): string => {
+  for (const selector of selectors) {
+    const value = normalizeWhitespace(root.find(selector).first().attr(attribute) || '');
+    if (value) {
+      return value;
     }
   }
 
@@ -290,6 +332,9 @@ const getClosestJobCard = ($: cheerio.CheerioAPI, element: any): any => {
     '.job_seen_beacon',
     '.base-card',
     '.job-search-card',
+    '.jobs-search-results__list-item',
+    '.job-card-container',
+    '.job-card-list',
     'article',
     'li',
     '[data-testid="job-card"]'
@@ -458,11 +503,16 @@ const siteConfigs: Record<JobSearchSite, ScrapeConfig> = {
   },
   linkedin: {
     searchUrl: 'https://www.linkedin.com/jobs/search/?keywords=',
-    titleSelector: '.base-search-card__title, .job-card-list__title, a.job-card-list__title',
-    companySelector: '.base-search-card__subtitle, .job-card-container__primary-description',
-    descriptionSelector: '.base-search-card__metadata, .job-search-card__snippet',
-    linkSelector: 'a.base-card__full-link, a.job-card-list__title, a[href*="/jobs/view/"]',
-    locationSelector: '.job-search-card__location, .job-card-container__metadata-item',
+    titleSelector:
+      '.base-search-card__title, .job-card-list__title, a.job-card-list__title, .job-card-container__link, [data-test-job-card-title]',
+    companySelector:
+      '.base-search-card__subtitle, .job-card-container__primary-description, .artdeco-entity-lockup__subtitle, [data-test-job-card-company-name]',
+    descriptionSelector:
+      '.base-search-card__metadata, .job-search-card__snippet, .job-card-list__insight, .job-card-container__job-insight-text, [data-test-job-card-summary]',
+    linkSelector:
+      'a.base-card__full-link, a.job-card-list__title, a.job-card-container__link, a[href*="/jobs/view/"], a[href*="currentJobId="]',
+    locationSelector:
+      '.job-search-card__location, .job-card-container__metadata-item, .artdeco-entity-lockup__caption, [data-test-job-card-location]',
     salarySelector: '.job-search-card__salary-info',
     datePostedSelector: 'time, .job-search-card__listdate',
     locationParam: '&location=',
@@ -694,8 +744,19 @@ const extractJobsFromPage = async (
   await delay(contentDelay);
   
   const content = await page.content();
+  if (site === 'linkedin') {
+    await saveLinkedInSearchPageSnapshot(page, content);
+  }
+
   const $ = cheerio.load(content);
   const jobs: Job[] = [];
+
+  if (site === 'linkedin') {
+    const linkedInJobs = extractLinkedInJobs($);
+    if (linkedInJobs.length > 0) {
+      return linkedInJobs;
+    }
+  }
 
   if (site === 'employmenthero') {
     const employmentHeroJobs = extractEmploymentHeroJobs($);
@@ -753,6 +814,119 @@ const extractJobsFromPage = async (
   }
   
   return jobs;
+};
+
+const normalizeLinkedInJobUrl = (href: string): string => {
+  const raw = normalizeWhitespace(href);
+  if (!raw) {
+    return '';
+  }
+
+  try {
+    const url = new URL(raw, 'https://www.linkedin.com');
+    const viewMatch = url.pathname.match(/\/jobs\/view\/(\d+)/);
+    const currentJobId = url.searchParams.get('currentJobId');
+    const jobId = viewMatch?.[1] || currentJobId || '';
+    if (jobId) {
+      return `https://www.linkedin.com/jobs/view/${jobId}/`;
+    }
+
+    if (url.hostname.includes('linkedin.') && url.pathname.includes('/jobs/')) {
+      return url.toString();
+    }
+  } catch {
+    return '';
+  }
+
+  return '';
+};
+
+const extractLinkedInJobTitle = (card: any, link: any): string => {
+  const candidates = [
+    link.find('strong').first().text(),
+    link.find('[aria-hidden="true"]').first().text(),
+    link.text(),
+    link.attr('aria-label'),
+    link.attr('title')
+  ];
+
+  for (const candidate of candidates) {
+    const title = normalizeWhitespace(candidate || '').replace(/^View job:\s*/i, '');
+    if (title) {
+      return title;
+    }
+  }
+
+  return getFirstText(card, [
+    '.base-search-card__title',
+    '.job-card-list__title',
+    '.job-card-container__link',
+    '.job-card-container__title',
+    '.jobs-unified-top-card__job-title',
+    '.artdeco-entity-lockup__title',
+    '[data-test-job-card-title]',
+    'strong'
+  ]);
+};
+
+const extractLinkedInJobs = ($: cheerio.CheerioAPI): Job[] => {
+  const jobsByUrl = new Map<string, Job>();
+
+  $('a[href*="/jobs/view/"], a[href*="currentJobId="]').each((_, element) => {
+    const link = $(element);
+    const url = normalizeLinkedInJobUrl(link.attr('href') || '');
+    if (!url || jobsByUrl.has(url)) {
+      return;
+    }
+
+    const card = getClosestJobCard($, element);
+    const title = extractLinkedInJobTitle(card, link);
+    if (!title) {
+      return;
+    }
+
+    const company = getFirstText(card, [
+      '.base-search-card__subtitle',
+      '.job-card-container__primary-description',
+      '.artdeco-entity-lockup__subtitle',
+      '[data-test-job-card-company-name]',
+      'a[href*="/company/"]'
+    ]);
+    const description = getFirstMultilineText(card, [
+      '.job-search-card__snippet',
+      '.base-search-card__metadata',
+      '.job-card-list__insight',
+      '.job-card-container__job-insight-text',
+      '[data-test-job-card-summary]'
+    ]);
+    const location = getFirstText(card, [
+      '.job-search-card__location',
+      '.job-card-container__metadata-item',
+      '.artdeco-entity-lockup__caption',
+      '[data-test-job-card-location]'
+    ]);
+    const salary = getFirstText(card, [
+      '.job-search-card__salary-info',
+      '.job-card-container__metadata-wrapper li'
+    ]);
+    const datePosted =
+      getFirstText(card, ['time', '.job-search-card__listdate']) ||
+      getFirstAttribute(card, ['time'], 'datetime');
+
+    jobsByUrl.set(url, {
+      id: uuidv4(),
+      title,
+      company,
+      description,
+      url,
+      location,
+      salary,
+      datePosted
+    });
+  });
+
+  console.log(`Extracted ${jobsByUrl.size} LinkedIn jobs from anchors`);
+  return Array.from(jobsByUrl.values());
 };
 
 const stripHtml = (value: string): string => normalizeMultilineText(cheerio.load(value).text());
