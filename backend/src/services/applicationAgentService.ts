@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+import { BrowserContext, Page, chromium } from 'playwright';
 import { ApplicationProfile } from '../models/ApplicationProfile';
 import { AiModel } from '../models/AiSettings';
 import { Job } from '../models/Job';
@@ -41,6 +44,34 @@ export type {
   TailoredResumeSnapshot
 };
 export { buildApplicationSnapshot, openSeekLoginBrowser };
+
+export type LoginPlatform = 'seek' | 'linkedin' | 'employmenthero';
+
+interface LoginBrowserConfig {
+  platform: LoginPlatform;
+  displayName: string;
+  loginUrl: string;
+  profileDirName: string;
+}
+
+const PLAYWRIGHT_DIR = path.resolve(__dirname, '../../.playwright');
+
+const loginBrowserConfigs: Record<Exclude<LoginPlatform, 'seek'>, LoginBrowserConfig> = {
+  linkedin: {
+    platform: 'linkedin',
+    displayName: 'LinkedIn',
+    loginUrl: 'https://www.linkedin.com/login',
+    profileDirName: 'linkedin-profile'
+  },
+  employmenthero: {
+    platform: 'employmenthero',
+    displayName: 'Employment Hero',
+    loginUrl: 'https://employmenthero.com/jobs/',
+    profileDirName: 'employmenthero-profile'
+  }
+};
+
+const loginSessions = new Map<LoginPlatform, { context: BrowserContext; page: Page }>();
 
 export type OrchestratedApplicationStatus =
   | 'applied'
@@ -216,6 +247,110 @@ const buildSkippedAdapterResult = (
   applicationSnapshot: buildApplicationSnapshot(job, resume)
 });
 
+const getBrowserChannel = (): 'chrome' | 'msedge' | undefined => {
+  const configured = process.env.PLAYWRIGHT_BROWSER_CHANNEL?.toLowerCase();
+
+  if (configured === 'chrome' || configured === 'msedge') {
+    return configured;
+  }
+
+  return process.platform === 'win32' ? 'chrome' : undefined;
+};
+
+const getSlowMo = (): number => {
+  const configured = Number(process.env.PLAYWRIGHT_SLOWMO_MS);
+  if (Number.isFinite(configured) && configured >= 0) {
+    return Math.max(150, configured);
+  }
+
+  return 150;
+};
+
+const getLoginProfileDir = (profileDirName: string): string => {
+  const configured = process.env.PLAYWRIGHT_USER_DATA_DIR?.trim();
+  if (configured && profileDirName === 'seek-profile') {
+    return configured;
+  }
+
+  return path.join(PLAYWRIGHT_DIR, profileDirName);
+};
+
+const closeLoginSessionIfOpen = async (platform: LoginPlatform): Promise<void> => {
+  const session = loginSessions.get(platform);
+  if (!session) {
+    return;
+  }
+
+  try {
+    await session.context.close();
+  } catch {
+    // Ignore cleanup failures for already-closed browser windows.
+  } finally {
+    loginSessions.delete(platform);
+  }
+};
+
+const openSharedLoginBrowser = async (
+  config: LoginBrowserConfig
+): Promise<{ message: string; profileDir: string; url: string }> => {
+  const existingSession = loginSessions.get(config.platform);
+  const profileDir = getLoginProfileDir(config.profileDirName);
+
+  if (existingSession) {
+    try {
+      await existingSession.page.goto(config.loginUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000
+      });
+      await existingSession.page.bringToFront();
+      return {
+        message: `${config.displayName} login browser is already open. Log in there once, then future auto-apply runs will reuse this profile.`,
+        profileDir,
+        url: existingSession.page.url()
+      };
+    } catch {
+      await closeLoginSessionIfOpen(config.platform);
+    }
+  }
+
+  fs.mkdirSync(profileDir, { recursive: true });
+  const context = await chromium.launchPersistentContext(profileDir, {
+    channel: getBrowserChannel(),
+    headless: false,
+    slowMo: getSlowMo(),
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    viewport: { width: 1440, height: 960 }
+  });
+  const page = context.pages()[0] || (await context.newPage());
+  await page.goto(config.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.bringToFront();
+
+  context.on('close', () => {
+    const session = loginSessions.get(config.platform);
+    if (session?.context === context) {
+      loginSessions.delete(config.platform);
+    }
+  });
+
+  loginSessions.set(config.platform, { context, page });
+
+  return {
+    message: `Opened a Playwright-controlled ${config.displayName} login window. Log in once there and later auto-apply runs will reuse the same Chrome profile.`,
+    profileDir,
+    url: page.url()
+  };
+};
+
+export const openJobSiteLoginBrowser = async (
+  platform: LoginPlatform
+): Promise<{ message: string; profileDir: string; url: string }> => {
+  if (platform === 'seek') {
+    return openSeekLoginBrowser();
+  }
+
+  return openSharedLoginBrowser(loginBrowserConfigs[platform]);
+};
+
 export const applyToJob = async (
   job: Job,
   resume: Resume,
@@ -254,32 +389,38 @@ export const applyToJob = async (
   });
 
   try {
-    const result =
-      allowedPlatforms && !allowedPlatforms.has(platform)
-        ? buildSkippedAdapterResult(
-            job,
-            resume,
-            `Skipped auto-apply because platform "${platform}" is not in APPLY_AGENT_ALLOWED_PLATFORMS.`,
-            [
-              `Detected platform: ${platform}.`,
-              `Selected adapter: ${adapter.id}.`,
-              'Application was skipped before browser automation.'
-            ]
-          )
-        : await adapter.apply({
-            job,
-            resume,
-            applicationProfile,
-            applicationId: trackedApplication.id,
-            applicationRunId: applicationRun.id,
-            platform,
-            requireFinalReview,
-            metadata: {
-              triggerSource,
-              requireFinalReview,
-              aiModel
-            }
-          });
+    let result: ApplicationResult;
+    if (allowedPlatforms && !allowedPlatforms.has(platform)) {
+      result = buildSkippedAdapterResult(
+        job,
+        resume,
+        `Skipped auto-apply because platform "${platform}" is not in APPLY_AGENT_ALLOWED_PLATFORMS.`,
+        [
+          `Detected platform: ${platform}.`,
+          `Selected adapter: ${adapter.id}.`,
+          'Application was skipped before browser automation.'
+        ]
+      );
+    } else {
+      if (platform === 'linkedin' || platform === 'employmenthero') {
+        await closeLoginSessionIfOpen(platform);
+      }
+
+      result = await adapter.apply({
+        job,
+        resume,
+        applicationProfile,
+        applicationId: trackedApplication.id,
+        applicationRunId: applicationRun.id,
+        platform,
+        requireFinalReview,
+        metadata: {
+          triggerSource,
+          requireFinalReview,
+          aiModel
+        }
+      });
+    }
 
     markRunFromAdapterResult(applicationRun.id, result);
     const mappedResult = mapAdapterResult(job, resume, result, {

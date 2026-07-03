@@ -1,7 +1,19 @@
 import { Browser, BrowserContext, chromium, Page } from 'playwright';
 import * as cheerio from 'cheerio';
+import fs from 'fs';
+import path from 'path';
 import { Job } from '../models/Job';
 import { v4 as uuidv4 } from 'uuid';
+
+export const SUPPORTED_JOB_SEARCH_SITES = ['seek', 'linkedin', 'employmenthero'] as const;
+export type JobSearchSite = typeof SUPPORTED_JOB_SEARCH_SITES[number];
+
+const PLAYWRIGHT_DIR = path.resolve(__dirname, '../../.playwright');
+const SITE_PROFILE_DIRS: Record<JobSearchSite, string> = {
+  seek: 'seek-profile',
+  linkedin: 'linkedin-profile',
+  employmenthero: 'employmenthero-profile'
+};
 
 /**
  * Generate a random delay between min and max milliseconds
@@ -54,9 +66,21 @@ const getBrowserChannel = (): 'chrome' | 'msedge' | undefined => {
   return undefined;
 };
 
-const getUserDataDir = (): string | undefined => {
+const getUserDataDir = (site?: JobSearchSite): string | undefined => {
   const configured = process.env.PLAYWRIGHT_USER_DATA_DIR?.trim();
-  return configured ? configured : undefined;
+  if (configured && !site) {
+    return configured;
+  }
+
+  if (!site) {
+    return undefined;
+  }
+
+  if (configured && site === 'seek') {
+    return configured;
+  }
+
+  return path.join(PLAYWRIGHT_DIR, SITE_PROFILE_DIRS[site]);
 };
 
 const getDefaultViewport = () => {
@@ -262,6 +286,10 @@ const mergeScrapedDetails = (
 const getClosestJobCard = ($: cheerio.CheerioAPI, element: any): any => {
   const selectors = [
     '[data-automation="jobCard"]',
+    '[data-testid="slider_item"]',
+    '.job_seen_beacon',
+    '.base-card',
+    '.job-search-card',
     'article',
     'li',
     '[data-testid="job-card"]'
@@ -280,30 +308,39 @@ const getClosestJobCard = ($: cheerio.CheerioAPI, element: any): any => {
 const launchBrowserSession = async (
   headless: boolean,
   slowMo: number,
-  userAgent: string
+  userAgent: string,
+  site?: JobSearchSite
 ): Promise<BrowserSession> => {
   const channel = getBrowserChannel();
-  const userDataDir = getUserDataDir();
+  const userDataDir = getUserDataDir(site);
   const viewport = getDefaultViewport();
 
   console.log(`Browser channel: ${channel ?? 'playwright-chromium'}`);
   if (userDataDir) {
     console.log(`Using persistent browser profile: ${userDataDir}`);
-    const context = await chromium.launchPersistentContext(userDataDir, {
-      channel,
-      headless,
-      slowMo,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      viewport,
-      userAgent
-    });
+    fs.mkdirSync(userDataDir, { recursive: true });
+    try {
+      const context = await chromium.launchPersistentContext(userDataDir, {
+        channel,
+        headless,
+        slowMo,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        viewport,
+        userAgent
+      });
 
-    let page = context.pages()[0];
-    if (!page) {
-      page = await context.newPage();
+      let page = context.pages()[0];
+      if (!page) {
+        page = await context.newPage();
+      }
+
+      return { context, page };
+    } catch (error) {
+      console.warn(
+        `Could not open persistent ${site || 'job search'} profile; falling back to a temporary browser context:`,
+        error instanceof Error ? error.message : error
+      );
     }
-
-    return { context, page };
   }
 
   const browser = await chromium.launch({
@@ -401,9 +438,12 @@ interface ScrapeConfig {
   salarySelector?: string;
   datePostedSelector?: string;
   locationParam?: string;
+  baseUrl: string;
+  searchInputSelector?: string;
+  appendSearchTermsToUrl?: boolean;
 }
 
-const siteConfigs: Record<string, ScrapeConfig> = {
+const siteConfigs: Record<JobSearchSite, ScrapeConfig> = {
   seek: {
     searchUrl: 'https://www.seek.com.au/jobs?keywords=',
     titleSelector: '[data-automation="jobTitle"]',
@@ -413,15 +453,87 @@ const siteConfigs: Record<string, ScrapeConfig> = {
     locationSelector: '[data-automation="jobLocation"]',
     salarySelector: '[data-automation="jobSalary"]',
     datePostedSelector: '[data-automation="jobListingDate"]',
-    locationParam: '&where='
+    locationParam: '&where=',
+    baseUrl: 'https://www.seek.com.au'
+  },
+  linkedin: {
+    searchUrl: 'https://www.linkedin.com/jobs/search/?keywords=',
+    titleSelector: '.base-search-card__title, .job-card-list__title, a.job-card-list__title',
+    companySelector: '.base-search-card__subtitle, .job-card-container__primary-description',
+    descriptionSelector: '.base-search-card__metadata, .job-search-card__snippet',
+    linkSelector: 'a.base-card__full-link, a.job-card-list__title, a[href*="/jobs/view/"]',
+    locationSelector: '.job-search-card__location, .job-card-container__metadata-item',
+    salarySelector: '.job-search-card__salary-info',
+    datePostedSelector: 'time, .job-search-card__listdate',
+    locationParam: '&location=',
+    baseUrl: 'https://www.linkedin.com'
+  },
+  employmenthero: {
+    searchUrl: 'https://employmenthero.com/jobs/',
+    titleSelector: '.eh-job-item__title, a.eh-job-item',
+    companySelector: '.eh-job-item__company',
+    descriptionSelector: '.eh-job-item__description, .eh-job-item__details',
+    linkSelector: 'a.eh-job-item, a[href*="/jobs/position/"]',
+    locationSelector: '.eh-job-item__location, [data-wp-text="context.item.location"]',
+    salarySelector: '.eh-job-item__salary',
+    datePostedSelector: '.eh-job-item__posted-date, .eh-job-item__date',
+    baseUrl: 'https://employmenthero.com',
+    searchInputSelector: '.nlp-search-input',
+    appendSearchTermsToUrl: false
   }
+};
+
+export const buildSearchUrl = (
+  site: JobSearchSite,
+  searchTerms: string,
+  location: string = 'Perth, WA'
+): string => {
+  const config = siteConfigs[site];
+  let searchUrl =
+    config.appendSearchTermsToUrl === false
+      ? config.searchUrl
+      : `${config.searchUrl}${encodeURIComponent(searchTerms)}`;
+
+  if (config.appendSearchTermsToUrl !== false && config.locationParam && location) {
+    searchUrl += `${config.locationParam}${encodeURIComponent(location)}`;
+  }
+
+  return searchUrl;
+};
+
+const getEmploymentHeroSearchText = (searchTerms: string, location: string): string =>
+  [searchTerms, location].map(value => value.trim()).filter(Boolean).join(' in ');
+
+const runEmploymentHeroSearch = async (
+  page: Page,
+  searchTerms: string,
+  location: string
+): Promise<void> => {
+  const input = page.locator('.nlp-search-input').first();
+  if ((await input.count()) === 0) {
+    return;
+  }
+
+  await input.fill(getEmploymentHeroSearchText(searchTerms, location));
+
+  const searchButton = page
+    .locator('.nlp-icon-right button[data-wp-on--click="actions.onClickSearch"], button:has-text("Search")')
+    .first();
+  if ((await searchButton.count()) > 0) {
+    await searchButton.click({ timeout: 3000 }).catch(() => page.keyboard.press('Enter'));
+  } else {
+    await page.keyboard.press('Enter');
+  }
+
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => undefined);
+  await page.waitForTimeout(2500);
 };
 
 /**
  * Scrape jobs from a specific job site
  */
 export const scrapeJobSite = async (
-  site: 'seek',
+  site: JobSearchSite,
   searchTerms: string,
   location: string = 'Perth, WA',
   pageLimit: number = 1,
@@ -452,7 +564,7 @@ export const scrapeJobSite = async (
     // Set user agent to avoid being detected as a bot - use a variety of user agents
     const randomUserAgent = getRandomUserAgent();
     console.log(`Using user agent: ${randomUserAgent}`);
-    session = await launchBrowserSession(headless, slowMo, randomUserAgent);
+    session = await launchBrowserSession(headless, slowMo, randomUserAgent, site);
     const { page } = session;
     
     // Add random delay before navigation
@@ -462,16 +574,14 @@ export const scrapeJobSite = async (
     
     await maybeThrottleNetwork(page);
     
-    // Navigate to search URL with search terms and location
-    let searchUrl = `${config.searchUrl}${encodeURIComponent(searchTerms)}`;
-    
-    // Add location parameter if available in the config
-    if (config.locationParam && location) {
-      searchUrl += `${config.locationParam}${encodeURIComponent(location)}`;
-    }
+    const searchUrl = buildSearchUrl(site, searchTerms, location);
     
     console.log(`Navigating to: ${searchUrl}`);
-    await page.goto(searchUrl, { waitUntil: 'networkidle', timeout: 60000 });
+    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => undefined);
+    if (site === 'employmenthero') {
+      await runEmploymentHeroSearch(page, searchTerms, location);
+    }
     
     // Add random delay after page load
     const postNavigationDelay = randomDelay(2000, 5000);
@@ -536,7 +646,7 @@ export const scrapeJobSite = async (
         await simulateHumanMouseMovement(page);
         
         await clickNextPage(page, site);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => undefined);
         
         // Random delay after page transition
         const postClickDelay = randomDelay(3000, 6000);
@@ -576,7 +686,7 @@ export const scrapeJobSite = async (
 const extractJobsFromPage = async (
   page: Page,
   config: ScrapeConfig,
-  site: string
+  site: JobSearchSite
 ): Promise<Job[]> => {
   // Random delay before extracting content
   const contentDelay = randomDelay(500, 1800);
@@ -586,61 +696,137 @@ const extractJobsFromPage = async (
   const content = await page.content();
   const $ = cheerio.load(content);
   const jobs: Job[] = [];
-  
-  // Use different extraction strategies based on the site
-  if (site === 'seek') {
-    const jobElements = $(config.titleSelector);
-    console.log(`Found ${jobElements.length} job elements on page`);
-    
-    // Process each job with small random delays in between
-    for (let i = 0; i < jobElements.length; i++) {
-      const element = jobElements[i];
-      const jobCard = getClosestJobCard($, element);
-      const title = normalizeWhitespace($(element).text());
-      const href = $(element).attr('href');
-      const url = href ? new URL(href, 'https://www.seek.com.au').toString() : '';
-      const company = getFirstText(jobCard, [
-        config.companySelector,
-        '[data-automation="advertiser-name"]',
-        '[data-testid="job-card-company"]'
-      ]);
-      const description = getFirstMultilineText(jobCard, [
-        '[data-automation="jobShortDescription"]',
-        '[data-automation="jobDescription"]',
-        '[data-testid="job-card-teaser"]'
-      ]);
-      const location = getFirstText(jobCard, [
-        config.locationSelector || '',
-        '[data-automation="job-detail-location"]',
-        '[data-testid="job-card-location"]'
-      ].filter(Boolean));
-      const salary = getFirstText(jobCard, [config.salarySelector || ''].filter(Boolean));
-      const datePosted = getFirstText(jobCard, [config.datePostedSelector || ''].filter(Boolean));
 
-      if (!title || !url) {
-        continue;
-      }
-
-      jobs.push({
-        id: uuidv4(),
-        title,
-        company,
-        description,
-        url,
-        location,
-        salary,
-        datePosted
-      });
-      
-      // Add small random delay between processing jobs
-      if (i < jobElements.length - 1) {
-        const processingDelay = randomDelay(30, 150);
-        // Don't log these small delays to avoid cluttering the console
-        await delay(processingDelay);
-      }
+  if (site === 'employmenthero') {
+    const employmentHeroJobs = extractEmploymentHeroJobs($);
+    if (employmentHeroJobs.length > 0) {
+      return employmentHeroJobs;
     }
   }
   
+  const jobElements = $(config.titleSelector);
+  console.log(`Found ${jobElements.length} ${site} job elements on page`);
+
+  for (let i = 0; i < jobElements.length; i++) {
+    const element = jobElements[i];
+    const jobCard = getClosestJobCard($, element);
+    const linkElement = $(element).is('a') ? $(element) : jobCard.find(config.linkSelector).first();
+    const title = normalizeWhitespace($(element).text() || linkElement.text());
+    const href = linkElement.attr('href') || $(element).attr('href');
+    const url = href ? new URL(href, config.baseUrl).toString() : '';
+    const company = getFirstText(jobCard, [
+      config.companySelector,
+      '[data-automation="advertiser-name"]',
+      '[data-testid="job-card-company"]'
+    ]);
+    const description = getFirstMultilineText(jobCard, [
+      config.descriptionSelector,
+      '[data-automation="jobShortDescription"]',
+      '[data-testid="job-card-teaser"]'
+    ]);
+    const location = getFirstText(jobCard, [
+      config.locationSelector || '',
+      '[data-automation="job-detail-location"]',
+      '[data-testid="job-card-location"]'
+    ].filter(Boolean));
+    const salary = getFirstText(jobCard, [config.salarySelector || ''].filter(Boolean));
+    const datePosted = getFirstText(jobCard, [config.datePostedSelector || ''].filter(Boolean));
+
+    if (!title || !url) {
+      continue;
+    }
+
+    jobs.push({
+      id: uuidv4(),
+      title,
+      company,
+      description,
+      url,
+      location,
+      salary,
+      datePosted
+    });
+
+    if (i < jobElements.length - 1) {
+      await delay(randomDelay(30, 150));
+    }
+  }
+  
+  return jobs;
+};
+
+const stripHtml = (value: string): string => normalizeMultilineText(cheerio.load(value).text());
+
+const extractEmploymentHeroJobs = ($: cheerio.CheerioAPI): Job[] => {
+  const jobs: Job[] = [];
+
+  $('.eh-job-list[data-wp-context]').each((_, element) => {
+    const rawContext = $(element).attr('data-wp-context');
+    if (!rawContext) {
+      return;
+    }
+
+    try {
+      const context = JSON.parse(rawContext) as {
+        jobs?: Array<Record<string, any>>;
+        jobListState?: { jobs?: Array<Record<string, any>> };
+      };
+      const contextJobs = context.jobs || context.jobListState?.jobs || [];
+      contextJobs.forEach(job => {
+        const title = normalizeWhitespace(String(job.title || ''));
+        const url = normalizeWhitespace(String(job.jobUrl || job.url || ''));
+        if (!title || !url) {
+          return;
+        }
+
+        jobs.push({
+          id: uuidv4(),
+          title,
+          company: normalizeWhitespace(
+            String(job.organisation_name || job.organization_name || job.company_name || '')
+          ),
+          description: stripHtml(String(job.description || job.short_description || '')),
+          url: new URL(url, 'https://employmenthero.com').toString(),
+          location: normalizeWhitespace(
+            String(job.location || job.location_name || job.city || job.remote_flexibility || '')
+          ),
+          salary: normalizeWhitespace(String(job.formatted_salary_range || job.salary || '')),
+          datePosted: normalizeWhitespace(String(job.formatted_posted_date || job.created_at || ''))
+        });
+      });
+    } catch {
+      // Fall back to DOM selectors below.
+    }
+  });
+
+  if (jobs.length > 0) {
+    return jobs;
+  }
+
+  $('a.eh-job-item, a[href*="/jobs/position/"]').each((_, element) => {
+    const card = $(element);
+    const title = normalizeWhitespace(card.find('.eh-job-item__title').first().text() || card.text());
+    const href = card.attr('href');
+    if (!title || !href) {
+      return;
+    }
+
+    jobs.push({
+      id: uuidv4(),
+      title,
+      company: normalizeWhitespace(card.find('.eh-job-item__company').first().text()),
+      description: normalizeMultilineText(
+        card.find('.eh-job-item__description, .eh-job-item__details').first().text()
+      ),
+      url: new URL(href, 'https://employmenthero.com').toString(),
+      location: normalizeWhitespace(card.find('.eh-job-item__location').first().text()),
+      salary: normalizeWhitespace(card.find('.eh-job-item__salary').first().text()),
+      datePosted: normalizeWhitespace(
+        card.find('.eh-job-item__posted-date, .eh-job-item__date').first().text()
+      )
+    });
+  });
+
   return jobs;
 };
 
@@ -724,9 +910,13 @@ const hasNextPageButton = async (page: Page, site: string): Promise<boolean> => 
   console.log(`Delay before checking next page button: ${buttonCheckDelay}ms`);
   await delay(buttonCheckDelay);
   
-  return await page.evaluate(() => {
-    return document.querySelector('[data-automation="pagination-next"]') !== null;
-  });
+  const selector = getNextPageSelector(site);
+  const nextButton = page.locator(selector).first();
+  if ((await nextButton.count()) === 0) {
+    return false;
+  }
+
+  return nextButton.isEnabled().catch(() => false);
 };
 
 /**
@@ -738,7 +928,27 @@ const clickNextPage = async (page: Page, site: string): Promise<void> => {
   console.log(`Small delay before click action: ${preClickDelay}ms`);
   await delay(preClickDelay);
   
-  await page.click('[data-automation="pagination-next"]');
+  await page.locator(getNextPageSelector(site)).first().click({ timeout: 10000 });
+};
+
+const getNextPageSelector = (site: string): string => {
+  switch (site) {
+    case 'linkedin':
+      return [
+        'button[aria-label="View next page"]',
+        'button[aria-label="Next"]',
+        'a[aria-label="Next"]'
+      ].join(', ');
+    case 'employmenthero':
+      return [
+        'button[aria-label="Next page"]',
+        'button[aria-label="Next"]',
+        '.eh-pagination button:last-child'
+      ].join(', ');
+    case 'seek':
+    default:
+      return '[data-automation="pagination-next"]';
+  }
 };
 
 /**
@@ -746,7 +956,7 @@ const clickNextPage = async (page: Page, site: string): Promise<void> => {
  */
 export const scrapeJobs = async (
   searchTerms: string[],
-  sites: ('seek')[] = ['seek'],
+  sites: JobSearchSite[] = ['seek'],
   pageLimit: number = 1,
   location: string = 'Perth, WA',
   maxJobs?: number
@@ -766,29 +976,26 @@ export const scrapeJobs = async (
   
   const allJobs: Job[] = [];
 
-  outerLoop:
   for (const term of shuffledTerms) {
-    for (const site of shuffledSites) {
-      console.log(`Scraping "${term}" on ${site}`);
-      try {
-        const jobs = await scrapeJobSite(
-          site,
-          term,
-          location,
-          pageLimit,
-          typeof maxJobs === 'number'
-            ? Math.max(1, maxJobs - dedupeJobs(allJobs).length)
-            : undefined
-        );
-        console.log(`Completed scraping ${site} for term "${term}": found ${jobs.length} jobs`);
-        allJobs.push(...jobs);
-        if (typeof maxJobs === 'number' && dedupeJobs(allJobs).length >= maxJobs) {
-          console.log(`Reached requested total max job count (${maxJobs})`);
-          break outerLoop;
+    const remainingJobs =
+      typeof maxJobs === 'number' ? Math.max(1, maxJobs - dedupeJobs(allJobs).length) : undefined;
+    console.log(`Scraping "${term}" across sites in parallel: ${shuffledSites.join(', ')}`);
+    const siteResults = await Promise.all(
+      shuffledSites.map(async site => {
+        try {
+          const jobs = await scrapeJobSite(site, term, location, pageLimit, remainingJobs);
+          console.log(`Completed scraping ${site} for term "${term}": found ${jobs.length} jobs`);
+          return jobs;
+        } catch (error) {
+          console.error(`Error scraping ${site} for term "${term}":`, error);
+          return [];
         }
-      } catch (error) {
-        console.error(`Error scraping ${site} for term "${term}":`, error);
-      }
+      })
+    );
+    allJobs.push(...siteResults.flat());
+    if (typeof maxJobs === 'number' && dedupeJobs(allJobs).length >= maxJobs) {
+      console.log(`Reached requested total max job count (${maxJobs})`);
+      break;
     }
   }
   

@@ -23,11 +23,14 @@
 - Paused and failed auto-apply runs persist diagnostics under `backend/.playwright/application-runs/<run-id>/`, including screenshot, HTML, visible text, structured page snapshot, detected fields, AI decision, URL/platform/adapter/step, and error stack where available.
 - Application run records are exposed through `/api/application-runs`, including diagnostics, current URL/status/platform, screenshot/snapshot links, artifact URLs, and the matching linked human intervention status. Human intervention records store `applicationRunId` and expose linked artifact URLs.
 - The Progress page now includes an application run status summary and `ApplicationRunViewer` in the details modal for current/past browser attempts, screenshots, failures, and intervention state.
-- Application platform detection lives in `backend/src/services/applicationPlatformService.ts`. It detects seek, indeed, linkedin, employmenthero, greenhouse, lever, workday, smartrecruiters, bamboohr, ashby, pageup, successfactors, taleo, and falls back to `generic`.
+- Application platform detection lives in `backend/src/services/applicationPlatformService.ts`. It detects seek, linkedin, employmenthero, greenhouse, lever, workday, smartrecruiters, bamboohr, ashby, pageup, successfactors, taleo, and falls back to `generic`.
 - `applicationAgentService.ts` is the apply orchestrator. It creates tracked applications/runs, detects platform, enforces `APPLY_AGENT_ALLOWED_PLATFORMS`, selects the adapter, passes `APPLY_AGENT_REQUIRE_FINAL_REVIEW`, maps adapter statuses back to frontend-compatible results, and finalizes tracking.
 - Auto-apply now defaults `APPLY_AGENT_REQUIRE_FINAL_REVIEW` to false when unset. The SEEK LLM should only create `review_required` handoffs when automation cannot continue, such as captcha, MFA/login, unsupported legal declarations, or missing required information.
+- Job search now targets Seek, LinkedIn, and Employment Hero from the frontend and backend. Backend scraping runs the selected sites in parallel per search term, then dedupes and applies the requested total job limit.
+- Seek and LinkedIn each have search URL construction covered by `backend npm run test:job-search-sites`; LinkedIn pagination uses site-specific next controls.
+- The Resume section has login buttons for Seek, LinkedIn, and Employment Hero. `/api/apply/login/:platform` opens a Playwright-controlled persistent profile for each platform.
 - Fully automatic apply has a user-selectable match percentage threshold in the job list header. The value is saved in browser local storage under `jobfinder.autoApplyMatchThreshold` and defaults to the previous 60% cutoff.
-- Application adapter contracts live in `backend/src/services/applicationAdapters/types.ts`. The registry in `applicationAdapters/adapterRegistry.ts` currently registers `seek`, `indeed`, `linkedin`, `employmenthero`, and `generic`; unsupported known ATS platforms route to `generic` until dedicated adapters are added. Indeed, LinkedIn, and Employment Hero use site-profile safe form adapters for login/CAPTCHA handoff, resume upload, profile fields, question pages, sensitive/unknown question review, and forced final-review pause before submit.
+- Application adapter contracts live in `backend/src/services/applicationAdapters/types.ts`. The registry in `applicationAdapters/adapterRegistry.ts` currently registers `seek`, `linkedin`, `employmenthero`, and `generic`; unsupported known ATS platforms route to `generic` until dedicated adapters are added. LinkedIn and Employment Hero use site-profile safe form adapters for login/CAPTCHA handoff, resume upload, profile fields, question pages, sensitive/unknown question review, and forced final-review pause before submit.
 
 ---
 
@@ -173,7 +176,7 @@ JobFinder/
   jobTitle: string;
   jobLocation: string;
   suburbOrPostcode: string;
-  applicationMethod: '' | 'seek' | 'company_website' | 'linkedin' | 'indeed' | 'email' | 'recruiter' | 'referral' | 'other';
+  applicationMethod: '' | 'seek' | 'company_website' | 'linkedin' | 'employmenthero' | 'email' | 'recruiter' | 'referral' | 'other';
   applicationSubmittedDate: string;  // YYYY-MM-DD
   interviewedForJob: boolean;
   employedForJob: boolean;
@@ -217,6 +220,7 @@ JobFinder/
 | POST | `/api/openai/evaluate-job-match` | Single job match evaluation |
 | POST | `/api/openai/evaluate-job-matches-bulk` | Bulk scoring (batched, retried, with fallback) |
 | POST | `/api/apply/profile/fill` | Fill the saved application profile from stored parsed resumes using AI |
+| POST | `/api/apply/login/:platform` | Open a persistent login browser for `seek`, `linkedin`, or `employmenthero` |
 | GET | `/api/application-runs` | List application run attempts, optionally filtered by `applicationId` or `status` |
 | GET | `/api/application-runs/:id` | Get one application run with diagnostics, artifacts, and latest intervention status |
 | POST | `/api/application-runs/:id/cancel` | Cancel an active run by marking it skipped |
@@ -249,10 +253,10 @@ JobFinder/
 ### 3. Scrape Jobs
 - User clicks "Search Jobs" (or submits custom terms)
 - `POST /api/scrape/jobs` with `{ searchTerms, sites, location, pageLimit }`
-- Backend iterates all `searchTerm × site` combinations
-- Each combination: Playwright launches headless Chromium → human-like delays, random UA, scrolling → Cheerio extracts jobs
+- Backend runs each selected site in parallel for a search term, then moves to the next term
+- Each site scrape: Playwright launches Chromium, uses human-like delays, random UA and scrolling, then Cheerio extracts jobs
 - Results deduplicated by `title + company`
-- **Only Seek is fully configured.** Passing `indeed` or `linkedin` throws `"Scraping configuration not found"` and triggers frontend fallback
+- Current implementation searches Seek, LinkedIn, and Employment Hero, running selected sites in parallel per search term before deduping and applying the total job limit.
 
 ### 4. Bulk Score Jobs
 - `POST /api/openai/evaluate-job-matches-bulk` with all jobs + resume
@@ -358,7 +362,7 @@ All three frontend services (`resumeParserService`, `scrapeService`, `openAiServ
 | Issue | Detail |
 |---|---|
 | **Route naming mismatch** | Routes/controllers use `openai*` names but implementation uses Gemini. Legacy mentions of `OPENAI_API_KEY` in docs are wrong; `GEMINI_API_KEY` is what's used. |
-| **Seek-only scraping** | `siteConfigs` only has Seek. `indeed` and `linkedin` are accepted by the controller but will throw at the service level. |
+| **Scraper fragility** | Seek, LinkedIn, and Employment Hero use public page selectors that can break if the sites change markup or require login/challenge flows. |
 | **Hardcoded backend URL** | Frontend always points to `http://localhost:5000/api`. No env var override. |
 | **Default location mismatch** | `useJobSearch` hook defaults to `"Australia"`, but some service/controller defaults use `"Perth, WA"`. |
 | **No persistence** | No database. All state is in-memory per browser session. |
@@ -384,6 +388,6 @@ All three frontend services (`resumeParserService`, `scrapeService`, `openAiServ
 1. `GET /api/health` returns `200`
 2. `POST /api/resume/parse` with a real PDF returns non-empty `content`
 3. `POST /api/openai/generate-search-terms` returns an array of 5–8 strings
-4. `POST /api/scrape/jobs` with `sites: ["seek"]` returns non-empty jobs array
+4. `POST /api/scrape/jobs` with `sites: ["seek", "linkedin", "employmenthero"]` returns deduped jobs
 5. `POST /api/openai/evaluate-job-matches-bulk` returns `{ id, matchScore }[]` with scores 0–100
 6. UI renders sorted job cards with match percentages visible

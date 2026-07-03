@@ -35,6 +35,8 @@ export interface SeekLoginResult {
   url: string;
 }
 
+export type LoginPlatform = 'seek' | 'linkedin' | 'employmenthero';
+
 export interface ApplicationProfileFillResult {
   profile: ApplicationProfile;
   updatedFields: string[];
@@ -71,6 +73,18 @@ export const openSeekLoginBrowser = async (): Promise<SeekLoginResult> => {
   }
 
   throw new Error('Invalid response format from Seek login API');
+};
+
+export const openJobSiteLoginBrowser = async (
+  platform: LoginPlatform
+): Promise<SeekLoginResult> => {
+  const response = await axios.post(`${API_URL}/apply/login/${platform}`);
+
+  if (response.data && response.data.data) {
+    return response.data.data as SeekLoginResult;
+  }
+
+  throw new Error(`Invalid response format from ${platform} login API`);
 };
 
 export const fillApplicationProfileWithAi = async (

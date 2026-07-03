@@ -2,7 +2,6 @@ import { ApplicationPlatform, detectPlatform } from './services/applicationPlatf
 
 const cases: Array<{ url: string; expected: ApplicationPlatform }> = [
   { url: 'https://www.seek.com.au/job/123', expected: 'seek' },
-  { url: 'https://au.indeed.com/viewjob?jk=123', expected: 'indeed' },
   { url: 'https://www.linkedin.com/jobs/view/123', expected: 'linkedin' },
   { url: 'https://au.linkedin.com/jobs/search/?keywords=developer', expected: 'linkedin' },
   { url: 'https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/123', expected: 'linkedin' },

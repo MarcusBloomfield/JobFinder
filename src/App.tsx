@@ -10,9 +10,16 @@ import LocationSelector from './components/LocationSelector';
 import JobSearchAmountSelector from './components/JobSearchAmountSelector';
 import JobList from './components/JobList';
 import useJobSearch from './hooks/useJobSearch';
+import type { LoginPlatform } from './services/applicationService';
 import './styles/App.css';
 
 type AppPage = 'search' | 'profile' | 'progress' | 'settings';
+
+const jobSiteLoginButtons: Array<{ platform: LoginPlatform; label: string }> = [
+    { platform: 'seek', label: 'Seek' },
+    { platform: 'linkedin', label: 'LinkedIn' },
+    { platform: 'employmenthero', label: 'Employment Hero' }
+];
 
 const getPageFromHash = (): AppPage => {
     if (typeof window === 'undefined') {
@@ -49,8 +56,8 @@ const App: React.FC = () => {
             location,
             jobSearchAmount,
             autoApplyMatchThreshold,
-            seekLoginMessage,
-            isSeekLoginLoading,
+            jobSiteLoginMessages,
+            jobSiteLoginLoading,
             isStoredResumesLoading,
             applicationProfile,
             aiSettings,
@@ -70,7 +77,7 @@ const App: React.FC = () => {
             evaluateMatch,
             applyToJob,
             autoApplyMatchingJobs,
-            loginToSeek,
+            loginToJobSite,
             setLocation,
             setJobSearchAmount,
             setAutoApplyMatchThreshold,
@@ -179,15 +186,27 @@ const App: React.FC = () => {
                         <div className="resume-section">
                             <h2>Resume</h2>
                             <div className="seek-login-row">
-                                <button
-                                    className="seek-login-button"
-                                    disabled={isSeekLoginLoading}
-                                    onClick={() => void loginToSeek()}
-                                >
-                                    {isSeekLoginLoading ? 'Opening Seek Login...' : 'Login to Seek'}
-                                </button>
-                                {seekLoginMessage && <p className="seek-login-message">{seekLoginMessage}</p>}
+                                {jobSiteLoginButtons.map(({ platform, label }) => {
+                                    const isLoginLoading = Boolean(jobSiteLoginLoading[platform]);
+                                    return (
+                                        <button
+                                            key={platform}
+                                            className="seek-login-button"
+                                            disabled={isLoginLoading}
+                                            onClick={() => void loginToJobSite(platform)}
+                                        >
+                                            {isLoginLoading ? `Opening ${label} Login...` : `Login to ${label}`}
+                                        </button>
+                                    );
+                                })}
                             </div>
+                            {jobSiteLoginButtons.map(({ platform }) =>
+                                jobSiteLoginMessages[platform] ? (
+                                    <p key={platform} className="seek-login-message">
+                                        {jobSiteLoginMessages[platform]}
+                                    </p>
+                                ) : null
+                            )}
                             {resume ? (
                                 <div className="resume-info">
                                     <div className="resume-file-info">

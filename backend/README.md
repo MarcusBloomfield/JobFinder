@@ -4,7 +4,7 @@ This is the backend server for the WebJobFinder application. It provides APIs fo
 
 ## Features
 
-- **Job Scraping**: Scrape job listings from multiple job sites (Seek, Indeed, LinkedIn)
+- **Job Scraping**: Scrape job listings from multiple job sites (Seek, LinkedIn, Employment Hero)
 - **Resume Parsing**: Extract text and information from PDF and DOCX resume files
 - **OpenAI Integration**: Generate job search terms and evaluate job matches based on resume content
 - **Application Tracking**: Store auto-apply attempts and outcomes in SQLite for later progress reporting

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Resume } from '../models/Resume';
 import { Job } from '../models/Job';
 import { JobDetails } from '../models/JobDetails';
+import type { LoginPlatform } from '../services/applicationService';
 import {
   ApplicationProfile,
   DEFAULT_APPLICATION_PROFILE,
@@ -27,7 +28,7 @@ import {
   enrichTrackedApplicationFromListing,
   fillApplicationProfileWithAi,
   normalizeTrackedJobUrl,
-  openSeekLoginBrowser,
+  openJobSiteLoginBrowser,
   updateTrackedApplicationProgressStage,
   updateApplicationJobDetails
 } from '../services/applicationService';
@@ -43,8 +44,8 @@ interface JobSearchState {
   location: string;
   jobSearchAmount: number;
   autoApplyMatchThreshold: number;
-  seekLoginMessage: string | null;
-  isSeekLoginLoading: boolean;
+  jobSiteLoginMessages: Partial<Record<LoginPlatform, string>>;
+  jobSiteLoginLoading: Partial<Record<LoginPlatform, boolean>>;
   isStoredResumesLoading: boolean;
   applicationProfile: ApplicationProfile;
   applicationTrackingSummary: ApplicationTrackingSummary | null;
@@ -65,7 +66,7 @@ interface JobSearchActions {
   evaluateMatch: (jobId: string) => Promise<void>;
   applyToJob: (jobId: string) => Promise<void>;
   autoApplyMatchingJobs: () => Promise<void>;
-  loginToSeek: () => Promise<void>;
+  loginToJobSite: (platform: LoginPlatform) => Promise<void>;
   setLocation: (location: string) => void;
   setJobSearchAmount: (amount: number) => void;
   setAutoApplyMatchThreshold: (threshold: number) => void;
@@ -198,8 +199,12 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
   const [autoApplyMatchThreshold, setAutoApplyMatchThreshold] = useState<number>(() =>
     loadStoredAutoApplyMatchThreshold()
   );
-  const [seekLoginMessage, setSeekLoginMessage] = useState<string | null>(null);
-  const [isSeekLoginLoading, setIsSeekLoginLoading] = useState<boolean>(false);
+  const [jobSiteLoginMessages, setJobSiteLoginMessages] = useState<
+    Partial<Record<LoginPlatform, string>>
+  >({});
+  const [jobSiteLoginLoading, setJobSiteLoginLoading] = useState<
+    Partial<Record<LoginPlatform, boolean>>
+  >({});
   const [isStoredResumesLoading, setIsStoredResumesLoading] = useState<boolean>(false);
   const [applicationProfile, setApplicationProfile] = useState<ApplicationProfile>(() =>
     loadStoredApplicationProfile()
@@ -393,7 +398,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       // Scrape jobs using the search terms and location
       const scrapedJobs = await scrapeJobs(
         termsToUse,
-        ['seek'],
+        ['seek', 'linkedin', 'employmenthero'],
         getPageLimitForMaxJobs(jobSearchAmount),
         location,
         jobSearchAmount
@@ -443,7 +448,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     try {
       const scrapedJobs = await scrapeJobs(
         termsToUse,
-        ['seek'],
+        ['seek', 'linkedin', 'employmenthero'],
         getPageLimitForMaxJobs(jobSearchAmount),
         location,
         jobSearchAmount
@@ -696,20 +701,32 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     }
   };
 
-  const loginToSeek = async (): Promise<void> => {
+  const loginToJobSite = async (platform: LoginPlatform): Promise<void> => {
     setError(null);
-    setSeekLoginMessage(null);
-    setIsSeekLoginLoading(true);
+    setJobSiteLoginMessages(currentMessages => ({
+      ...currentMessages,
+      [platform]: undefined
+    }));
+    setJobSiteLoginLoading(currentLoading => ({
+      ...currentLoading,
+      [platform]: true
+    }));
 
     try {
-      const result = await openSeekLoginBrowser();
-      setSeekLoginMessage(result.message);
+      const result = await openJobSiteLoginBrowser(platform);
+      setJobSiteLoginMessages(currentMessages => ({
+        ...currentMessages,
+        [platform]: result.message
+      }));
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to open the Seek login browser';
+        error instanceof Error ? error.message : `Failed to open the ${platform} login browser`;
       setError(message);
     } finally {
-      setIsSeekLoginLoading(false);
+      setJobSiteLoginLoading(currentLoading => ({
+        ...currentLoading,
+        [platform]: false
+      }));
     }
   };
 
@@ -857,8 +874,8 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       location,
       jobSearchAmount,
       autoApplyMatchThreshold,
-      seekLoginMessage,
-      isSeekLoginLoading,
+      jobSiteLoginMessages,
+      jobSiteLoginLoading,
       isStoredResumesLoading,
       applicationProfile,
       applicationTrackingSummary,
@@ -878,7 +895,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       evaluateMatch,
       applyToJob,
       autoApplyMatchingJobs,
-      loginToSeek,
+      loginToJobSite,
       setLocation: updateLocation,
       setJobSearchAmount,
       setAutoApplyMatchThreshold: updateAutoApplyMatchThreshold,

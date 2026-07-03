@@ -22,19 +22,6 @@ if (seekUrlAdapter.id !== 'seek') {
   failures.push(`seek URL: expected seek, got ${seekUrlAdapter.id}`);
 }
 
-const indeedUrlAdapter = getApplicationAdapterForUrl('https://au.indeed.com/viewjob?jk=123');
-if (indeedUrlAdapter.id !== 'indeed') {
-  failures.push(`indeed URL: expected indeed, got ${indeedUrlAdapter.id}`);
-}
-if (indeedUrlAdapter.canAutoSubmit) {
-  failures.push('indeed adapter: expected canAutoSubmit=false for final-review handoff');
-}
-
-const registeredIndeedAdapter = getRegisteredApplicationAdapters().find(adapter => adapter.id === 'indeed');
-if (!registeredIndeedAdapter || registeredIndeedAdapter.platform !== 'indeed') {
-  failures.push('registered adapters: expected indeed adapter registration');
-}
-
 const linkedInUrlAdapter = getApplicationAdapterForUrl('https://www.linkedin.com/jobs/view/123');
 if (linkedInUrlAdapter.id !== 'linkedin') {
   failures.push(`LinkedIn URL: expected linkedin, got ${linkedInUrlAdapter.id}`);

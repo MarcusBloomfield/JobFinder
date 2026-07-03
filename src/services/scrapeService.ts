@@ -13,6 +13,8 @@ interface ScrapeConfig {
     datePostedSelector?: string;
 }
 
+export type JobSearchSite = 'seek' | 'linkedin' | 'employmenthero';
+
 const siteConfigs: Record<string, ScrapeConfig> = {
     seek: {
         searchUrl: 'https://www.seek.com.au/jobs?keywords=',
@@ -129,7 +131,7 @@ const generateMockJobs = (searchTerms: string, location: string = 'Perth, WA'): 
  * Scrape jobs from a specific job site
  */
 export const scrapeJobSite = async (
-    site: 'seek',
+    site: JobSearchSite,
     searchTerms: string,
     pageLimit: number = 1,
     location: string = 'Perth, WA',
@@ -166,7 +168,7 @@ export const scrapeJobSite = async (
  */
 export const scrapeJobs = async (
     searchTerms: string[],
-    sites: ('seek')[] = ['seek'],
+    sites: JobSearchSite[] = ['seek'],
     pageLimit: number = 1,
     location: string = 'Perth, WA',
     maxJobs?: number

@@ -67,13 +67,13 @@ const SUBMISSION_TEXT_PATTERN =
   /\b(application submitted|application received|thank you for applying|your application has been submitted)\b/i;
 const CAPTCHA_PATTERN = /\b(captcha|recaptcha|hcaptcha|i am human|not a robot)\b/i;
 const LOGIN_PAGE_TEXT_PATTERN =
-  /\b(sign in to apply|log in to apply|login to apply|sign in or create an account|log in or create an account|create an account to continue|indeed account)\b/i;
+  /\b(sign in to apply|log in to apply|login to apply|sign in or create an account|log in or create an account|create an account to continue)\b/i;
 const LOGIN_BUTTON_TEXT_PATTERN =
   /^(log in|login|sign in|sign-in|sign in to apply|continue with google|continue with microsoft|continue with apple|continue with facebook|create account|create an account)$/i;
 const VERIFICATION_TEXT_PATTERN =
   /\b(verification code|verify your email|verify your identity|two-factor|2fa|otp|one-time password|authenticator|sms code)\b/i;
 const NEXT_BUTTON_PATTERN =
-  /^(continue|next|save and continue|review|review application|continue application|proceed|apply now|continue to application|apply with (?:your )?indeed resume|use (?:your )?indeed resume)$/i;
+  /^(continue|next|save and continue|review|review application|continue application|proceed|apply now|continue to application)$/i;
 const FINAL_SUBMIT_BUTTON_PATTERN =
   /^(submit|submit application|submit your application|send application|complete application|finish application|confirm application|apply)$/i;
 const REVIEW_BUTTON_PATTERN = /^(review|review application|preview|preview application)$/i;

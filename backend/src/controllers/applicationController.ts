@@ -189,6 +189,33 @@ export const openSeekLoginBrowser = async (_req: Request, res: Response) => {
   }
 };
 
+export const openJobSiteLoginBrowser = async (req: Request, res: Response) => {
+  try {
+    const platform = req.params.platform;
+
+    if (platform !== 'seek' && platform !== 'linkedin' && platform !== 'employmenthero') {
+      return res.status(400).json({
+        error: true,
+        message: 'Invalid login platform. Expected seek, linkedin, or employmenthero.'
+      });
+    }
+
+    const result = await applicationAgentService.openJobSiteLoginBrowser(platform);
+
+    res.status(200).json({
+      error: false,
+      message: result.message,
+      data: result
+    });
+  } catch (error) {
+    console.error('Error in openJobSiteLoginBrowser controller:', error);
+    res.status(500).json({
+      error: true,
+      message: error instanceof Error ? error.message : 'An unknown error occurred'
+    });
+  }
+};
+
 export const fillApplicationProfile = async (req: Request, res: Response) => {
   try {
     const { resumes, applicationProfile, aiModel } = req.body;
