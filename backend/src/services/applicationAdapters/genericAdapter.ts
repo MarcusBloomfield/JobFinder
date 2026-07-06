@@ -65,13 +65,28 @@ const PHONE_PATTERN = /\b(?:\+?\d[\d()\-\s]{7,}\d)\b/;
 const URL_PATTERN = /\bhttps?:\/\/[^\s]+/gi;
 const SUBMISSION_TEXT_PATTERN =
   /\b(application submitted|application received|thank you for applying|your application has been submitted)\b/i;
-const CAPTCHA_PATTERN = /\b(captcha|recaptcha|hcaptcha|i am human|not a robot)\b/i;
+const CAPTCHA_PATTERN =
+  /\b(captcha|recaptcha|hcaptcha|turnstile|i am human|not a robot|are you human|human verification|verify you are human|solve the puzzle|press and hold|cloudflare challenge)\b/i;
+const BOT_CHECK_PATTERN =
+  /\b(bot check|bot detection|anti-bot|automated traffic|unusual traffic|checking your browser|browser check|security check|security verification|access check|challenge page)\b/i;
 const LOGIN_PAGE_TEXT_PATTERN =
-  /\b(sign in to apply|log in to apply|login to apply|sign in or create an account|log in or create an account|create an account to continue)\b/i;
+  /\b(sign in to apply|log in to apply|login to apply|sign in or create an account|log in or create an account|create an account to continue|single sign-on|single sign on|sso|saml|oauth)\b/i;
+const ACCOUNT_PAGE_TEXT_PATTERN =
+  /\b(create account|create an account|create your account|new account|candidate account|account creation|set up your account|create your profile)\b/i;
+const WEAK_ACCOUNT_TEXT_PATTERN =
+  /\b(sign up|signup|register|registration|join now)\b/i;
+const PASSWORD_TEXT_PATTERN =
+  /\b(password|create password|confirm password|new password|choose a password|set password|password required)\b/i;
+const ACCOUNT_SECURITY_TEXT_PATTERN =
+  /\b(account security|security question|security answer|secret question|secret answer|recovery question|recovery email|mother'?s maiden name)\b/i;
 const LOGIN_BUTTON_TEXT_PATTERN =
-  /^(log in|login|sign in|sign-in|sign in to apply|continue with google|continue with microsoft|continue with apple|continue with facebook|create account|create an account)$/i;
+  /^(log in|login|sign in|sign-in|sign in to apply|sign up|signup|register|create account|create an account|create profile|create your profile|apply with linkedin|continue with google|continue with microsoft|continue with apple|continue with facebook|continue with linkedin|continue with sso|sign in with google|sign in with microsoft|sign in with apple|sign in with facebook|sign in with linkedin|sign in with sso|log in with google|log in with microsoft|log in with apple|log in with facebook|log in with linkedin|log in with sso|single sign-on|sso)$/i;
 const VERIFICATION_TEXT_PATTERN =
-  /\b(verification code|verify your email|verify your identity|two-factor|2fa|otp|one-time password|authenticator|sms code)\b/i;
+  /\b(verification code|verify your email|email verification|verify email|verify your identity|identity verification|two-factor|two factor|two-step|two step|2fa|mfa|multi-factor|multifactor|otp|one-time password|one time password|authenticator|sms code|text message code|magic link|passcode)\b/i;
+const AUTH_URL_PATTERN =
+  /\/(login|log-in|signin|sign-in|signup|sign-up|register|registration|create-account|account\/login|oauth|sso|saml)(?:[/?#]|$)/i;
+const APPLICATION_FORM_FIELD_PATTERN =
+  /\b(first name|last name|full name|given name|family name|email address|phone|mobile|resume|cv|cover letter|address|city|suburb|postcode|postal code|linkedin|portfolio|work experience|education|current employer|notice period)\b/i;
 const NEXT_BUTTON_PATTERN =
   /^(continue|next|save and continue|review|review application|continue application|proceed|apply now|continue to application)$/i;
 const FINAL_SUBMIT_BUTTON_PATTERN =
@@ -93,6 +108,14 @@ interface StepSnapshot {
   visibleText: string;
   controls: FormExtractionResult;
   buttons: ButtonCandidate[];
+}
+
+interface GenericBlockerSnapshot {
+  url?: string;
+  title?: string;
+  visibleText?: string;
+  controls?: Array<Partial<ExtractedFormControl>>;
+  buttons?: Array<Partial<ButtonCandidate>>;
 }
 
 interface InterventionOutcome {
@@ -339,7 +362,7 @@ const shouldRunHeadless = (): boolean => {
   if (configured === 'false') {
     return false;
   }
-  return process.env.NODE_ENV === 'production';
+  return false;
 };
 
 const getSlowMo = (headless: boolean): number => {
@@ -797,41 +820,107 @@ const findSubmissionSignal = (snapshot: StepSnapshot): boolean => {
   );
 };
 
-const findBlockingReason = (
-  snapshot: StepSnapshot
-): { reason: HumanInterventionReason; message: string } | null => {
-  const pageText = `${snapshot.title} ${snapshot.visibleText}`;
-  const normalized = pageText.toLowerCase();
+const getBlockingControlText = (control: Partial<ExtractedFormControl>): string =>
+  [
+    control.type,
+    control.name,
+    control.id,
+    control.placeholder,
+    control.ariaLabel,
+    control.labelText,
+    control.parentText,
+    control.nearbyText,
+    control.options?.map(option => `${option.label} ${option.value}`).join(' ')
+  ]
+    .filter(Boolean)
+    .join(' ');
 
-  if (CAPTCHA_PATTERN.test(pageText)) {
+const hasApplicationFormSignal = (
+  controls: Array<Partial<ExtractedFormControl>>,
+  buttons: Array<Partial<ButtonCandidate>>
+): boolean => {
+  const hasApplicationField = controls.some(control => {
+    if (control.type === 'password') {
+      return false;
+    }
+    return APPLICATION_FORM_FIELD_PATTERN.test(getBlockingControlText(control));
+  });
+
+  if (hasApplicationField) {
+    return true;
+  }
+
+  const hasFillableControl = controls.some(control => {
+    const type = (control.type || '').toLowerCase();
+    return type !== 'hidden' && type !== 'button' && type !== 'submit' && type !== 'password';
+  });
+  const hasProgressButton = buttons.some(button =>
+    NEXT_BUTTON_PATTERN.test(button.text || '') || REVIEW_BUTTON_PATTERN.test(button.text || '')
+  );
+
+  return hasFillableControl && hasProgressButton;
+};
+
+export const classifyGenericApplicationBlocker = (
+  snapshot: GenericBlockerSnapshot
+): { reason: HumanInterventionReason; message: string } | null => {
+  const pageText = `${snapshot.title || ''} ${snapshot.visibleText || ''}`;
+  const url = snapshot.url || '';
+  const controls = snapshot.controls || [];
+  const buttons = snapshot.buttons || [];
+  const controlText = controls.map(getBlockingControlText).join(' ');
+  const buttonText = buttons.map(button => button.text || '').join(' ');
+  const combinedText = `${pageText} ${controlText} ${buttonText}`;
+  const nonButtonText = `${pageText} ${controlText}`;
+  const hasApplicationForm = hasApplicationFormSignal(controls, buttons);
+  const hasAuthButton = buttons.some(button => LOGIN_BUTTON_TEXT_PATTERN.test(button.text || ''));
+  const hasWeakAccountText = WEAK_ACCOUNT_TEXT_PATTERN.test(combinedText);
+
+  if (CAPTCHA_PATTERN.test(combinedText) || BOT_CHECK_PATTERN.test(combinedText)) {
     return {
       reason: 'captcha',
-      message: 'CAPTCHA detected. Complete it manually, then continue the run.'
+      message: 'CAPTCHA or bot check detected. Complete it manually, then continue the run.'
     };
   }
 
-  const hasPasswordField = snapshot.controls.controls.some(control => control.type === 'password');
-  if (VERIFICATION_TEXT_PATTERN.test(pageText)) {
+  if (VERIFICATION_TEXT_PATTERN.test(combinedText)) {
     return {
       reason: 'mfa',
       message: 'Verification or MFA step detected. Complete it manually, then continue the run.'
     };
   }
 
+  const hasPasswordField = controls.some(control => control.type === 'password');
   if (
     hasPasswordField ||
-    LOGIN_PAGE_TEXT_PATTERN.test(pageText) ||
-    snapshot.buttons.some(button => LOGIN_BUTTON_TEXT_PATTERN.test(button.text)) ||
-    snapshot.url.toLowerCase().includes('/login')
+    PASSWORD_TEXT_PATTERN.test(combinedText) ||
+    ACCOUNT_SECURITY_TEXT_PATTERN.test(combinedText) ||
+    LOGIN_PAGE_TEXT_PATTERN.test(nonButtonText) ||
+    ACCOUNT_PAGE_TEXT_PATTERN.test(nonButtonText) ||
+    AUTH_URL_PATTERN.test(url.toLowerCase()) ||
+    (hasAuthButton && !hasApplicationForm) ||
+    (hasWeakAccountText && !hasApplicationForm)
   ) {
     return {
       reason: 'manual_review',
-      message: 'Login step detected. Sign in manually, then continue the run.'
+      message:
+        'Login, account, password, SSO, or account-security step detected. Complete it manually, then continue the run.'
     };
   }
 
   return null;
 };
+
+const findBlockingReason = (
+  snapshot: StepSnapshot
+): { reason: HumanInterventionReason; message: string } | null =>
+  classifyGenericApplicationBlocker({
+    url: snapshot.url,
+    title: snapshot.title,
+    visibleText: snapshot.visibleText,
+    controls: snapshot.controls.controls,
+    buttons: snapshot.buttons
+  });
 
 const getFinalButton = (buttons: ButtonCandidate[]): ButtonCandidate | undefined =>
   buttons.find(button => !button.disabled && FINAL_SUBMIT_BUTTON_PATTERN.test(button.text));
@@ -959,6 +1048,10 @@ const actionForApprovedAnswer = (
   control: ExtractedFormControl,
   answer: string
 ): FormMappingDecision['action'] | undefined => {
+  if (control.type === 'password') {
+    return undefined;
+  }
+
   if (control.tag === 'select') {
     return 'select';
   }
@@ -1045,6 +1138,7 @@ const waitForIntervention = async (options: {
   screenshot?: ApplicationAdapterArtifact;
   snapshotArtifact?: { filePath: string; url: string };
   artifactUrls?: Array<{ filePath: string; url: string }>;
+  visibleText?: string;
   metadata?: Record<string, unknown>;
   logs: string[];
   readyForReviewOnTimeout?: boolean;
@@ -1068,6 +1162,19 @@ const waitForIntervention = async (options: {
     }
   }
   const adapterConfig = getRuntimeConfig(options.context);
+  const diagnosticArtifacts = (options.artifactUrls || []).map(artifact => ({
+    filePath: artifact.filePath,
+    url: artifact.url,
+    kind: artifact.filePath.endsWith('.html')
+      ? 'html'
+      : artifact.filePath.endsWith('.txt')
+        ? 'visible_text'
+        : artifact.filePath.endsWith('.json')
+          ? 'snapshot'
+          : artifact.filePath.endsWith('.png')
+            ? 'screenshot'
+            : 'artifact'
+  }));
 
   const intervention = createHumanIntervention({
     applicationId: options.context.applicationId,
@@ -1081,9 +1188,28 @@ const waitForIntervention = async (options: {
     metadata: {
       jobId: options.context.job.id,
       jobUrl: options.context.job.url,
+      company: options.context.job.company,
+      title: options.context.job.title,
+      applicationRunId: options.context.applicationRunId,
+      currentUrl: options.pageUrl,
       step: options.step,
       adapterId: adapterConfig.id,
       adapterName: adapterConfig.displayName,
+      diagnosticArtifacts,
+      diagnostics: {
+        currentUrl: options.pageUrl,
+        screenshotUrl: options.screenshot?.url,
+        screenshotFilePath: options.screenshot?.filePath,
+        snapshotUrl: options.snapshotArtifact?.url,
+        snapshotFilePath: options.snapshotArtifact?.filePath,
+        htmlUrls: diagnosticArtifacts
+          .filter(artifact => artifact.kind === 'html')
+          .map(artifact => artifact.url),
+        visibleTextUrls: diagnosticArtifacts
+          .filter(artifact => artifact.kind === 'visible_text')
+          .map(artifact => artifact.url),
+        visibleTextExcerpt: compactText(options.visibleText, 2000)
+      },
       artifactUrls: options.artifactUrls || [],
       ...(options.metadata || {})
     }
@@ -1227,9 +1353,12 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
       await settlePage(currentPage);
       const snapshot = await captureStepSnapshot(currentPage);
       lastUrl = snapshot.url;
-      const mapping = await mapExtractedFormControls(snapshot.controls, effectiveProfile, {
-        allowOpenAI: true
-      });
+      const blockingReason = findBlockingReason(snapshot);
+      const mapping = blockingReason
+        ? undefined
+        : await mapExtractedFormControls(snapshot.controls, effectiveProfile, {
+            allowOpenAI: true
+          });
 
       const diagnostics = await saveStepDiagnostics({
         page: currentPage,
@@ -1283,7 +1412,6 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
         );
       }
 
-      const blockingReason = findBlockingReason(snapshot);
       if (blockingReason) {
         const intervention = await waitForIntervention({
           context,
@@ -1299,6 +1427,7 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
             diagnostics.htmlArtifact,
             diagnostics.textArtifact
           ],
+          visibleText: snapshot.visibleText,
           logs
         });
 
@@ -1329,6 +1458,10 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
           step,
           artifacts
         );
+      }
+
+      if (!mapping) {
+        throw new Error('Generic form mapping was not available after blocker checks.');
       }
 
       const actionableDecisions = mapping.mapped.filter(
@@ -1387,6 +1520,7 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
             diagnostics.htmlArtifact,
             diagnostics.textArtifact
           ],
+          visibleText: snapshot.visibleText,
           metadata: {
             humanReviewFields: buildHumanReviewFields(
               unresolvedHumanDecisions,
@@ -1457,6 +1591,7 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
               diagnostics.htmlArtifact,
               diagnostics.textArtifact
             ],
+            visibleText: snapshot.visibleText,
             metadata: {
               savedAnswerSuggestions: buildSavedAnswerSuggestions(
                 mapping.mapped,
@@ -1527,6 +1662,7 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
           diagnostics.htmlArtifact,
           diagnostics.textArtifact
         ],
+        visibleText: snapshot.visibleText,
         logs
       });
 

@@ -278,6 +278,17 @@ const MARKETING_PATTERNS = [
   /\bpromotional\b/
 ];
 
+const ACCOUNT_SECURITY_PATTERNS = [
+  /\baccount security\b/,
+  /\bsecurity question\b/,
+  /\bsecurity answer\b/,
+  /\bsecret question\b/,
+  /\bsecret answer\b/,
+  /\brecovery question\b/,
+  /\brecovery email\b/,
+  /\bmother'?s maiden name\b/
+];
+
 const getControlText = (control: ExtractedFormControl): string =>
   [
     control.id,
@@ -559,9 +570,12 @@ const deterministicMapControl = async (
     return skipDecision(control, 'Buttons are navigation or submission controls, not fillable application fields.', 'high');
   }
 
-  const savedAnswerDecision = buildSavedAnswerDecision(control);
-  if (savedAnswerDecision) {
-    return savedAnswerDecision;
+  if (control.type === 'password') {
+    return needsHumanDecision(control, 'unsupported', 'Password fields require human handling.');
+  }
+
+  if (hasAny(text, ACCOUNT_SECURITY_PATTERNS)) {
+    return needsHumanDecision(control, 'unsupported', 'Account-security prompts require human handling.');
   }
 
   const humanCategory = findHumanReviewCategory(text);
@@ -573,8 +587,9 @@ const deterministicMapControl = async (
     );
   }
 
-  if (control.type === 'password') {
-    return needsHumanDecision(control, 'unsupported', 'Password fields require human handling.');
+  const savedAnswerDecision = buildSavedAnswerDecision(control);
+  if (savedAnswerDecision) {
+    return savedAnswerDecision;
   }
 
   if ((control.type === 'checkbox' || control.type === 'radio') && hasAny(text, MARKETING_PATTERNS)) {
