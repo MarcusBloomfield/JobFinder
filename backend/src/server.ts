@@ -47,6 +47,11 @@ app.use('/api/interventions', humanInterventionRoutes);
 app.use('/api/cover-letter-examples', coverLetterExampleRoutes);
 app.use('/api/saved-form-answers', savedFormAnswerRoutes);
 
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'ok', message: 'Server is running' });
+});
+
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../../dist')));
@@ -55,11 +60,6 @@ if (process.env.NODE_ENV === 'production') {
     res.sendFile(path.join(__dirname, '../../dist/index.html'));
   });
 }
-
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: 'ok', message: 'Server is running' });
-});
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
