@@ -197,6 +197,10 @@ const mapApplicationRunRow = (row: ApplicationRunRow): ApplicationRunRecord => (
 const isTerminalStatus = (status: ApplicationRunStatus): boolean =>
   status === 'submitted' || status === 'skipped' || status === 'failed';
 
+const isCancelledRun = (run: ApplicationRunRecord): boolean =>
+  run.status === 'skipped' &&
+  Boolean(run.metadata && typeof run.metadata.cancelledAt === 'string');
+
 export const initializeApplicationRunTracking = (): void => {
   getDatabase();
 };
@@ -259,6 +263,10 @@ export const updateApplicationRun = (
   const existing = getApplicationRunById(runId);
   if (!existing) {
     return null;
+  }
+
+  if (isCancelledRun(existing) && updates.status !== 'skipped') {
+    return existing;
   }
 
   const status = updates.status || existing.status;

@@ -2,6 +2,7 @@ import { ApplicationProfile } from '../../models/ApplicationProfile';
 import { Job } from '../../models/Job';
 import { Resume } from '../../models/Resume';
 import { ApplicationPlatform } from '../applicationPlatformService';
+import type { BrowserContext } from 'playwright';
 
 export const APPLICATION_ADAPTER_STATUSES = [
   'running',
@@ -65,10 +66,17 @@ export interface ApplicationContext {
   applicationProfile?: ApplicationProfile;
   applicationId?: string;
   applicationRunId?: string;
+  cancellation?: ApplicationRunCancellationHandle;
   platform: ApplicationPlatform;
   requireFinalReview?: boolean;
   availableResumes?: Resume[];
   metadata?: Record<string, unknown>;
+}
+
+export interface ApplicationRunCancellationHandle {
+  isCancellationRequested(): boolean;
+  throwIfCancellationRequested(): void;
+  registerBrowserContext(context: BrowserContext): void;
 }
 
 export interface ApplicationResult {

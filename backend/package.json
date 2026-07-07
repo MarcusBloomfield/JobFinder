@@ -11,6 +11,7 @@
     "test:openai": "ts-node src/test-openai.ts",
     "test:platform-detection": "ts-node src/test-platform-detection.ts",
     "test:adapter-registry": "ts-node src/test-application-adapter-registry.ts",
+    "test:application-cancellation": "ts-node src/test-application-cancellation.ts",
     "test:application-handoff": "ts-node src/test-application-handoff.ts",
     "test:generic-fully-auto-flow": "ts-node src/test-generic-fully-auto-flow.ts",
     "test:generic-blockers": "ts-node src/test-generic-blockers.ts",

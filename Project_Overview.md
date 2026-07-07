@@ -193,7 +193,7 @@ JobFinder/
 
 > **Progress stats** now focus on funnel counts the user can maintain from the Progress page: jobs applied for, interviewed for, and employed for.
 
-> **Auto-apply cover letters** are generated inside the SEEK adapter (`backend/src/services/applicationAdapters/seekAdapter.ts`), kept short/warm, cleaned deterministically, written to a DOCX artifact, and uploaded with the `upload_cover_letter` action. The adapter is explicitly blocked from typing cover-letter or motivation text directly into website fields; if a site only accepts typed cover-letter text, it requests human review.
+> **Auto-apply cover letters** are generated inside the SEEK adapter (`backend/src/services/applicationAdapters/seekAdapter.ts`), kept short/warm, written to a DOCX artifact, and uploaded with the `upload_cover_letter` action. The adapter is explicitly blocked from typing cover-letter or motivation text directly into website fields; if a site only accepts typed cover-letter text, it requests human review.
 
 > **Cover letter examples** can be uploaded from the front-page Resume section as PDF/DOCX files. `POST /api/cover-letter-examples/parse` extracts text and saves the examples in the browser-saved `ApplicationProfile`; auto-apply sends up to three examples to the cover-letter generator as style-only references.
 

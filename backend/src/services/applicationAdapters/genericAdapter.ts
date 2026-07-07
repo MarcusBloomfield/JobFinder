@@ -1443,12 +1443,17 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
   let lastUrl = context.job.url;
 
   try {
+    context.cancellation?.throwIfCancellationRequested();
     contextBrowser = await openGenericBrowser(context.job.url, adapterConfig.profileDirName);
+    context.cancellation?.registerBrowserContext(contextBrowser);
+    context.cancellation?.throwIfCancellationRequested();
     currentPage = contextBrowser.pages()[0] || (await contextBrowser.newPage());
     lastUrl = currentPage.url();
 
     for (let step = 1; step <= MAX_AGENT_STEPS; step += 1) {
+      context.cancellation?.throwIfCancellationRequested();
       await settlePage(currentPage);
+      context.cancellation?.throwIfCancellationRequested();
       const snapshot = await captureStepSnapshot(currentPage);
       lastUrl = snapshot.url;
       const blockingReason = findBlockingReason(snapshot);
@@ -1485,6 +1490,7 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
           ]
         }
       });
+      context.cancellation?.throwIfCancellationRequested();
 
       if (findSubmissionSignal(snapshot)) {
         if (context.applicationRunId) {
@@ -1583,6 +1589,7 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
       if (appliedActions.length > 0) {
         logs.push(...appliedActions.map(message => `Step ${step}: ${message}`));
         await settlePage(currentPage);
+        context.cancellation?.throwIfCancellationRequested();
         continue;
       }
 
@@ -1734,6 +1741,7 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
         await clickButton(currentPage, finalButton);
         logs.push(`Step ${step}: clicked final submit button "${finalButton.text}".`);
         await settlePage(currentPage);
+        context.cancellation?.throwIfCancellationRequested();
         continue;
       }
 
@@ -1742,6 +1750,7 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
         await clickButton(currentPage, nextButton);
         logs.push(`Step ${step}: clicked navigation button "${nextButton.text}".`);
         await settlePage(currentPage);
+        context.cancellation?.throwIfCancellationRequested();
         continue;
       }
 
@@ -1813,6 +1822,20 @@ const applyGeneric = async (context: ApplicationContext): Promise<ApplicationRes
       artifacts
     );
   } catch (error) {
+    if (context.cancellation?.isCancellationRequested()) {
+      logs.push('Cancelled by user.');
+      return buildResult(
+        context,
+        context.resume,
+        'skipped',
+        'Cancelled by user.',
+        logs,
+        lastUrl,
+        artifacts.length,
+        artifacts
+      );
+    }
+
     const message = error instanceof Error ? error.message : adapterConfig.failureMessage;
     logs.push(`Failed: ${message}`);
 

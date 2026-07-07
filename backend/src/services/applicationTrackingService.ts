@@ -865,6 +865,10 @@ export const finalizeTrackedApplication = (
   const now = new Date().toISOString();
   const applicationSnapshot = result.applicationSnapshot;
   const existingApplication = getTrackedApplicationById(applicationId);
+  if (existingApplication?.status === 'skipped' && existingApplication.message === 'Cancelled by user.') {
+    return existingApplication;
+  }
+
   const jobDetails = buildFinalizedJobDetails(existingApplication, result, now);
 
   getDatabase()
@@ -939,6 +943,29 @@ export const failTrackedApplication = (applicationId: string, message: string): 
         UPDATE job_applications
         SET
           status = 'failed',
+          message = ?,
+          updated_at = ?,
+          completed_at = ?
+        WHERE id = ?
+      `
+    )
+    .run(message, now, now, applicationId);
+
+  return getTrackedApplicationById(applicationId);
+};
+
+export const markTrackedApplicationSkipped = (
+  applicationId: string,
+  message: string
+): TrackedJobApplication | null => {
+  const now = new Date().toISOString();
+
+  getDatabase()
+    .prepare(
+      `
+        UPDATE job_applications
+        SET
+          status = 'skipped',
           message = ?,
           updated_at = ?,
           completed_at = ?

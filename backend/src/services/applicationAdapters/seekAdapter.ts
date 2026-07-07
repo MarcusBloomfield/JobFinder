@@ -27,6 +27,7 @@ import {
 import {
   ApplicationAdapter,
   ApplicationContext,
+  ApplicationRunCancellationHandle,
   ApplicationResult
 } from './types';
 
@@ -504,21 +505,7 @@ const waitWithTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promi
 const compactText = (value: string, maxLength: number): string =>
   value.replace(/\s+/g, ' ').trim().slice(0, maxLength);
 
-const normalizeCoverLetterText = (value: string): string => {
-  const normalized = value.normalize('NFKC');
-  const asciiPunctuation = normalized
-    .replace(/[\u2010-\u2015\u2212]/g, '-')
-    .replace(/[\u2018\u2019\u201A\u201B\u2032]/g, "'")
-    .replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"')
-    .replace(/\u2026/g, '...')
-    .replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g, ' ');
-  const withoutInvisible = asciiPunctuation.replace(
-    /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0]/g,
-    ''
-  );
-
-  return compactText(withoutInvisible, 900);
-};
+const limitCoverLetterText = (value: string): string => value.trim().slice(0, 900);
 
 const isCoverLetterFieldKind = (fieldKind: string): boolean =>
   fieldKind === 'cover_letter' || fieldKind === 'motivation';
@@ -991,10 +978,10 @@ const buildCoverLetterText = (
     ? ` ${compactText(profileSummary, 220)}`
     : '';
 
-  return normalizeCoverLetterText(
+  return (
     `The ${roleTitle} role at ${companyName} stood out to me because it matches the kind of work I enjoy most.${yearsText}` +
-      `${detailText} I like working with people, staying practical, and following through on the details. ` +
-      `I would love the chance to bring that approach to ${companyName}.`
+    `${detailText} I like working with people, staying practical, and following through on the details. ` +
+    `I would love the chance to bring that approach to ${companyName}.`
   );
 };
 
@@ -1022,7 +1009,7 @@ const buildCoverLetterDocumentText = async (
               'Write one concise, natural cover letter for a job application. Return only JSON with "coverLetter". ' +
               'Use only candidate facts from the resume/profile/job payload. Do not invent experience, skills, work rights, salary, dates, employers, or qualifications. ' +
               'Use coverLetterExamples only as style, tone, structure, and phrasing references, never as factual evidence. ' +
-              'Avoid AI-like mannerisms, em dashes, invisible formatting characters, generic hype, and over-polished wording.'
+              'Avoid generic hype and over-polished wording.'
           },
           {
             role: 'user',
@@ -1049,7 +1036,7 @@ const buildCoverLetterDocumentText = async (
     const rawContent = response.choices[0]?.message.content;
     const parsed = rawContent ? (JSON.parse(rawContent) as { coverLetter?: unknown }) : {};
     const generatedCoverLetter =
-      typeof parsed.coverLetter === 'string' ? normalizeCoverLetterText(parsed.coverLetter) : '';
+      typeof parsed.coverLetter === 'string' ? limitCoverLetterText(parsed.coverLetter) : '';
 
     return generatedCoverLetter || buildCoverLetterText(job, activeResumeOption.candidateProfile, applicationProfile);
   } catch (error) {
@@ -4080,7 +4067,7 @@ const executeDecision = async (
           : undefined;
       const typedText =
         (coverLetterFallbackText || text) !== undefined && isCoverLetterFieldKind(fieldKind)
-          ? normalizeCoverLetterText(coverLetterFallbackText || text || '')
+          ? coverLetterFallbackText || text || ''
           : text;
       const resolvedTargetId = resolveFallbackTypeTargetId(decision, snapshot);
       if (typedText === undefined) {
@@ -4225,7 +4212,7 @@ const executeDecision = async (
         if (!typedCoverLetterTarget) {
           throw uploadError;
         }
-        const typedText = normalizeCoverLetterText(coverLetterDocument.content);
+        const typedText = coverLetterDocument.content;
         await typeIntoTarget(page, typedCoverLetterTarget.id, typedText, fallbackSnapshot);
         await settlePage(page);
         return {
@@ -4320,8 +4307,10 @@ export const applyToJob = async (
   applicationId?: string,
   applicationRunId?: string,
   requireFinalReview = false,
-  aiModel?: AiModel
+  aiModel?: AiModel,
+  cancellation?: ApplicationRunCancellationHandle
 ): Promise<JobApplicationResult> => {
+  cancellation?.throwIfCancellationRequested();
   const runArtifactsDir = createRunArtifactsDir(job, applicationRunId);
   updateRunProgress(applicationRunId, {
     status: 'running',
@@ -4356,7 +4345,10 @@ export const applyToJob = async (
   );
   const applicationChecklist = createApplicationChecklistRuntime(activeResumeOption);
   await closeSeekLoginSessionIfOpen();
+  cancellation?.throwIfCancellationRequested();
   const session = await launchBrowserSession();
+  cancellation?.registerBrowserContext(session.context);
+  cancellation?.throwIfCancellationRequested();
   const logs: string[] = [];
   const artifacts: ApplicationArtifact[] = [];
   let lastSnapshot: PageSnapshot | null = null;
@@ -4382,8 +4374,10 @@ export const applyToJob = async (
     );
     logs.push(`Created cover-letter document: ${activeCoverLetterDocument.fileName}`);
     logs.push(`Opening job page: ${job.url}`);
+    cancellation?.throwIfCancellationRequested();
     await currentPage.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await settlePage(currentPage);
+    cancellation?.throwIfCancellationRequested();
     ensureAllowedAutomationUrl(currentPage.url());
     const initialScreenshot = await captureRunScreenshot(currentPage, runArtifactsDir, 0, 'initial-page');
     artifacts.push(initialScreenshot);
@@ -4396,6 +4390,7 @@ export const applyToJob = async (
     });
 
     for (let step = 1; step <= MAX_AGENT_STEPS; step += 1) {
+      cancellation?.throwIfCancellationRequested();
       lastSnapshot = await capturePageSnapshot(currentPage);
       ensureAllowedAutomationUrl(lastSnapshot.url);
       const stepSnapshotArtifact = saveRunSnapshot(
@@ -4411,6 +4406,7 @@ export const applyToJob = async (
         snapshotFilePath: stepSnapshotArtifact.filePath,
         snapshotUrl: stepSnapshotArtifact.url
       });
+      cancellation?.throwIfCancellationRequested();
 
       const completionMessage = detectCompletion(lastSnapshot);
       if (completionMessage) {
@@ -4995,6 +4991,7 @@ export const applyToJob = async (
             snapshotFilePath: actionSnapshotArtifact.filePath,
             snapshotUrl: actionSnapshotArtifact.url
           });
+          cancellation?.throwIfCancellationRequested();
 
           if (verification.success) {
             humanContinuationInstruction = undefined;
@@ -5016,6 +5013,10 @@ export const applyToJob = async (
             `Step ${step} retry ${attempt + 1}/${MAX_STEP_RECOVERY_ATTEMPTS} - ${verification.message}`
           );
         } catch (error) {
+          if (cancellation?.isCancellationRequested()) {
+            throw error;
+          }
+
           const blockedExternalWebsite = isExternalWebsiteBlockedError(error);
           const externalWebsiteHandoff = isExternalWebsiteHandoffError(error);
           const externalWebsiteTransition = blockedExternalWebsite || externalWebsiteHandoff;
@@ -5216,6 +5217,23 @@ export const applyToJob = async (
       })
     };
   } catch (error) {
+    if (cancellation?.isCancellationRequested()) {
+      logs.push('Cancelled by user.');
+      return {
+        status: 'skipped',
+        message: 'Cancelled by user.',
+        logs,
+        finalUrl: lastSnapshot?.url || job.url,
+        steps: logs.length,
+        artifacts,
+        applicationSnapshot: buildApplicationSnapshotFromOption(job, activeResumeOption, {
+          coverLetterText: lastCoverLetterText,
+          coverLetterUsed: coverLetterDocumentUploaded,
+          coverLetterDocument: lastCoverLetterDocument
+        })
+      };
+    }
+
     const blockedExternalWebsite = isExternalWebsiteBlockedError(error);
     const externalWebsiteHandoff = isExternalWebsiteHandoffError(error);
     const externalUrl = externalWebsiteHandoff ? error.externalUrl : undefined;
@@ -5401,7 +5419,8 @@ export const seekAdapter: ApplicationAdapter = {
         context.applicationId,
         context.applicationRunId,
         Boolean(context.requireFinalReview),
-        context.metadata?.aiModel as AiModel | undefined
+        context.metadata?.aiModel as AiModel | undefined,
+        context.cancellation
       )
     )
 };

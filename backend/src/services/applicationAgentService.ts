@@ -28,8 +28,15 @@ import {
   ApplicationTriggerSource,
   createTrackedApplication,
   failTrackedApplication,
-  finalizeTrackedApplication
+  finalizeTrackedApplication,
+  markTrackedApplicationSkipped
 } from './applicationTrackingService';
+import {
+  beginApplicationRunCancellationScope,
+  endApplicationRunCancellationScope,
+  isApplicationRunCancellationError,
+  isApplicationRunCancellationRequested
+} from './applicationRunCancellationService';
 import {
   ApplicationArtifact,
   ApplicationSnapshot,
@@ -195,6 +202,10 @@ const mapAdapterResult = (
 };
 
 const markRunFromAdapterResult = (runId: string, result: ApplicationResult): void => {
+  if (isApplicationRunCancellationRequested(runId)) {
+    return;
+  }
+
   const artifact = latestArtifact(result);
   const updates = {
     currentStep: result.steps,
@@ -444,8 +455,10 @@ export const applyToJob = async (
       aiModel
     }
   });
+  const cancellation = beginApplicationRunCancellationScope(applicationRun.id);
 
   try {
+    cancellation.throwIfCancellationRequested();
     let result: ApplicationResult;
     if (allowedPlatforms && !allowedPlatforms.has(platform)) {
       result = buildSkippedAdapterResult(
@@ -469,6 +482,7 @@ export const applyToJob = async (
         applicationProfile,
         applicationId: trackedApplication.id,
         applicationRunId: applicationRun.id,
+        cancellation,
         platform,
         requireFinalReview,
         metadata: {
@@ -534,6 +548,7 @@ export const applyToJob = async (
             applicationProfile,
             applicationId: trackedApplication.id,
             applicationRunId: applicationRun.id,
+            cancellation,
             platform: handoffPlatform,
             requireFinalReview,
             metadata: {
@@ -566,6 +581,13 @@ export const applyToJob = async (
       }
     }
 
+    if (isApplicationRunCancellationRequested(applicationRun.id)) {
+      result = buildSkippedAdapterResult(job, resume, 'Cancelled by user.', [
+        ...result.logs,
+        'Application run was cancelled by the user.'
+      ]);
+    }
+
     markRunFromAdapterResult(applicationRun.id, result);
     const resultPlatform = getResultPlatform(result, platform);
     const mappedResult = mapAdapterResult(job, resume, result, {
@@ -574,9 +596,29 @@ export const applyToJob = async (
       platform: resultPlatform,
       adapterId: getStringMetadata(result.metadata, 'adapterId') || adapter.id
     });
-    finalizeTrackedApplication(trackedApplication.id, mappedResult);
+    if (isApplicationRunCancellationRequested(applicationRun.id)) {
+      markTrackedApplicationSkipped(trackedApplication.id, 'Cancelled by user.');
+    } else {
+      finalizeTrackedApplication(trackedApplication.id, mappedResult);
+    }
     return mappedResult;
   } catch (error) {
+    if (
+      isApplicationRunCancellationError(error) ||
+      isApplicationRunCancellationRequested(applicationRun.id)
+    ) {
+      markTrackedApplicationSkipped(trackedApplication.id, 'Cancelled by user.');
+      const cancelledResult = buildSkippedAdapterResult(job, resume, 'Cancelled by user.', [
+        'Application run was cancelled by the user.'
+      ]);
+      return mapAdapterResult(job, resume, cancelledResult, {
+        trackingId: trackedApplication.id,
+        runId: applicationRun.id,
+        platform,
+        adapterId: adapter.id
+      });
+    }
+
     const message = error instanceof Error ? error.message : 'An unknown error occurred';
     failTrackedApplication(trackedApplication.id, message);
     markApplicationRunFailed(applicationRun.id, {
@@ -584,5 +626,7 @@ export const applyToJob = async (
       errorStack: error instanceof Error ? error.stack : undefined
     });
     throw error;
+  } finally {
+    endApplicationRunCancellationScope(applicationRun.id);
   }
 };

@@ -3,9 +3,9 @@ import {
   ApplicationRunRecord,
   ApplicationRunStatus,
   getApplicationRunById,
-  listApplicationRuns,
-  markApplicationRunSkipped
+  listApplicationRuns
 } from '../services/applicationRunTrackingService';
+import { requestApplicationRunCancellation } from '../services/applicationRunCancellationService';
 import {
   HumanInterventionRecord,
   listHumanInterventionsForApplication
@@ -213,7 +213,7 @@ export const getApplicationRun = (req: Request, res: Response) => {
   }
 };
 
-export const cancelApplicationRun = (req: Request, res: Response) => {
+export const cancelApplicationRun = async (req: Request, res: Response) => {
   try {
     const runId = getRunId(req);
     if (!runId) {
@@ -235,13 +235,7 @@ export const cancelApplicationRun = (req: Request, res: Response) => {
       });
     }
 
-    const cancelled = markApplicationRunSkipped(runId, {
-      errorMessage: 'Cancelled by user.',
-      metadata: {
-        ...(run.metadata || {}),
-        cancelledAt: new Date().toISOString()
-      }
-    });
+    const cancelled = await requestApplicationRunCancellation(runId);
 
     if (!cancelled) {
       return sendMissingRun(res);

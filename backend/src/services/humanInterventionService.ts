@@ -284,6 +284,23 @@ export const listHumanInterventionsForApplication = (
   return rows.map(mapHumanInterventionRow);
 };
 
+export const listHumanInterventionsForRun = (
+  applicationRunId: string
+): HumanInterventionRecord[] => {
+  const rows = getDatabase()
+    .prepare(
+      `
+        SELECT *
+        FROM human_interventions
+        WHERE application_run_id = ?
+        ORDER BY created_at DESC
+      `
+    )
+    .all<HumanInterventionRow>(applicationRunId);
+
+  return rows.map(mapHumanInterventionRow);
+};
+
 export const getHumanInterventionById = (
   interventionId: string
 ): HumanInterventionRecord | null => {
