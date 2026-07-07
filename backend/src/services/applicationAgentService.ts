@@ -124,7 +124,7 @@ const getAllowedPlatforms = (): Set<ApplicationPlatform> | null => {
   );
 };
 
-const mapAdapterResultStatus = (
+export const mapAdapterResultStatus = (
   status: ApplicationResult['status']
 ): JobApplicationResult['status'] => {
   switch (status) {
@@ -142,7 +142,7 @@ const mapAdapterResultStatus = (
   }
 };
 
-const mapOrchestrationStatus = (
+export const mapOrchestrationStatus = (
   status: ApplicationResult['status']
 ): OrchestratedApplicationStatus => {
   switch (status) {

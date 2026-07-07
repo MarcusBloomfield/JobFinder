@@ -118,6 +118,21 @@ interface GenericBlockerSnapshot {
   buttons?: Array<Partial<ButtonCandidate>>;
 }
 
+export type GenericApplicationStepAction =
+  | 'submitted_detected'
+  | 'pause_for_blocker'
+  | 'pause_for_final_review'
+  | 'submit_final'
+  | 'navigate_next'
+  | 'manual_review';
+
+export interface GenericApplicationStepValidationResult {
+  action: GenericApplicationStepAction;
+  reason?: HumanInterventionReason;
+  message: string;
+  buttonText?: string;
+}
+
 interface InterventionOutcome {
   resolution: 'continued' | 'skipped' | 'failed' | 'pending';
   interventionId: string;
@@ -932,6 +947,89 @@ const getNextButton = (buttons: ButtonCandidate[]): ButtonCandidate | undefined 
       !FINAL_SUBMIT_BUTTON_PATTERN.test(button.text) &&
       (NEXT_BUTTON_PATTERN.test(button.text) || REVIEW_BUTTON_PATTERN.test(button.text))
   );
+
+const normalizeButtonCandidates = (
+  buttons: Array<Partial<ButtonCandidate>> | undefined
+): ButtonCandidate[] =>
+  (buttons || []).map((button, index) => ({
+    text: compactText(button.text, 120),
+    selector: button.selector || `validation-button-${index}`,
+    type: button.type,
+    disabled: Boolean(button.disabled)
+  }));
+
+export const classifyGenericApplicationStepForValidation = (
+  snapshot: GenericBlockerSnapshot & { requireFinalReview?: boolean }
+): GenericApplicationStepValidationResult => {
+  const buttons = normalizeButtonCandidates(snapshot.buttons);
+  const validationSnapshot: StepSnapshot = {
+    url: snapshot.url || '',
+    title: snapshot.title || '',
+    visibleText: snapshot.visibleText || '',
+    buttons,
+    controls: {
+      url: snapshot.url || '',
+      title: snapshot.title || '',
+      extractedAt: new Date(0).toISOString(),
+      controls: []
+    }
+  };
+
+  if (findSubmissionSignal(validationSnapshot)) {
+    return {
+      action: 'submitted_detected',
+      message: 'Application submission success signal detected.'
+    };
+  }
+
+  const blocker = classifyGenericApplicationBlocker({
+    url: snapshot.url,
+    title: snapshot.title,
+    visibleText: snapshot.visibleText,
+    controls: snapshot.controls,
+    buttons
+  });
+  if (blocker) {
+    return {
+      action: 'pause_for_blocker',
+      reason: blocker.reason,
+      message: blocker.message
+    };
+  }
+
+  const finalButton = getFinalButton(buttons);
+  if (finalButton) {
+    if (snapshot.requireFinalReview !== false) {
+      return {
+        action: 'pause_for_final_review',
+        reason: 'final_submission_approval',
+        message: `Final submission is ready. Review the page, then continue to let the bot click "${finalButton.text}".`,
+        buttonText: finalButton.text
+      };
+    }
+
+    return {
+      action: 'submit_final',
+      message: `Final submit button "${finalButton.text}" can be clicked automatically.`,
+      buttonText: finalButton.text
+    };
+  }
+
+  const nextButton = getNextButton(buttons);
+  if (nextButton) {
+    return {
+      action: 'navigate_next',
+      message: `Navigation button "${nextButton.text}" can be clicked automatically.`,
+      buttonText: nextButton.text
+    };
+  }
+
+  return {
+    action: 'manual_review',
+    reason: 'manual_review',
+    message: 'No safe form action or navigation button was available. Manual review required.'
+  };
+};
 
 const resolveLocator = async (
   page: Page,
@@ -1749,7 +1847,7 @@ export const createGenericFormAdapter = (
   displayName: config.displayName,
   platform: config.platform,
   supportedPlatforms: config.supportedPlatforms,
-  canAutoSubmit: false,
+  canAutoSubmit: !config.forceFinalReview,
   apply: (context: ApplicationContext): Promise<ApplicationResult> =>
     applyGeneric({
       ...context,

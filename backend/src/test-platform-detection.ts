@@ -17,7 +17,9 @@ const cases: Array<{ url: string; expected: ApplicationPlatform }> = [
   { url: 'https://secure.dc2.pageuppeople.com/apply/123', expected: 'pageup' },
   { url: 'https://career10.successfactors.com/career?company=acme', expected: 'successfactors' },
   { url: 'https://acme.taleo.net/careersection/jobdetail.ftl?job=123', expected: 'taleo' },
-  { url: 'https://example.com/jobs/123', expected: 'generic' }
+  { url: 'https://example.com/jobs/123', expected: 'generic' },
+  { url: 'https://apply.example.com/application/software-engineer', expected: 'generic' },
+  { url: 'company.example.net/apply', expected: 'generic' }
 ];
 
 const failures = cases

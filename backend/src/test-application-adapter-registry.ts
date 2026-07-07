@@ -63,6 +63,14 @@ if (greenhouseUrlAdapter.id !== 'generic') {
   failures.push(`greenhouse URL: expected generic, got ${greenhouseUrlAdapter.id}`);
 }
 
+const customUrlAdapter = getApplicationAdapterForUrl('https://apply.example.com/application/123');
+if (customUrlAdapter.id !== 'generic') {
+  failures.push(`custom URL: expected generic, got ${customUrlAdapter.id}`);
+}
+if (!customUrlAdapter.canAutoSubmit) {
+  failures.push('generic adapter: expected canAutoSubmit=true for fully-auto unblocked custom flows');
+}
+
 if (failures.length > 0) {
   failures.forEach(failure => console.error(failure));
   process.exitCode = 1;
