@@ -525,7 +525,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
       // Scrape jobs using the search terms and location
       const scrapedJobs = await scrapeJobs(
         termsToUse,
-        ['seek', 'employmenthero'],
+        ['seek'],
         getPageLimitForMaxJobs(jobSearchAmount),
         location,
         jobSearchAmount
@@ -575,7 +575,7 @@ const useJobSearch = (): [JobSearchState, JobSearchActions] => {
     try {
       const scrapedJobs = await scrapeJobs(
         termsToUse,
-        ['seek', 'employmenthero'],
+        ['seek'],
         getPageLimitForMaxJobs(jobSearchAmount),
         location,
         jobSearchAmount

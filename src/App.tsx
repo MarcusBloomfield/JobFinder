@@ -17,8 +17,7 @@ import './styles/App.css';
 type AppPage = 'search' | 'profile' | 'progress' | 'settings';
 
 const jobSiteLoginButtons: Array<{ platform: LoginPlatform; label: string }> = [
-    { platform: 'seek', label: 'Seek' },
-    { platform: 'employmenthero', label: 'Employment Hero' }
+    { platform: 'seek', label: 'Seek' }
 ];
 
 const getPageFromHash = (): AppPage => {

@@ -6,8 +6,6 @@ const cases: Array<{ url: string; expected: ApplicationPlatform }> = [
   { url: 'https://au.linkedin.com/jobs/search/?keywords=developer', expected: 'generic' },
   { url: 'https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/123', expected: 'generic' },
   { url: 'https://www.linkedin.com/feed/', expected: 'generic' },
-  { url: 'https://jobs.swagapp.com/jobs/123', expected: 'employmenthero' },
-  { url: 'https://employmenthero.com/jobs/123', expected: 'employmenthero' },
   { url: 'https://boards.greenhouse.io/acme/jobs/123', expected: 'greenhouse' },
   { url: 'https://jobs.lever.co/acme/123', expected: 'lever' },
   { url: 'https://acme.wd3.myworkdayjobs.com/en-US/careers/job/123', expected: 'workday' },

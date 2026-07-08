@@ -1,7 +1,6 @@
 import {
   getApplicationAdapterForPlatform,
   getApplicationAdapterForUrl,
-  getRegisteredApplicationAdapters,
   KNOWN_APPLICATION_PLATFORMS,
   PLATFORM_ADAPTER_IDS
 } from './services/applicationAdapters/adapterRegistry';
@@ -25,21 +24,6 @@ if (seekUrlAdapter.id !== 'seek') {
 const linkedInUrlAdapter = getApplicationAdapterForUrl('https://www.linkedin.com/jobs/view/123');
 if (linkedInUrlAdapter.id !== 'generic') {
   failures.push(`LinkedIn URL: expected generic, got ${linkedInUrlAdapter.id}`);
-}
-
-const employmentHeroUrlAdapter = getApplicationAdapterForUrl('https://jobs.swagapp.com/jobs/123');
-if (employmentHeroUrlAdapter.id !== 'employmenthero') {
-  failures.push(`Employment Hero URL: expected employmenthero, got ${employmentHeroUrlAdapter.id}`);
-}
-if (employmentHeroUrlAdapter.canAutoSubmit) {
-  failures.push('employmenthero adapter: expected canAutoSubmit=false for final-review handoff');
-}
-
-const registeredEmploymentHeroAdapter = getRegisteredApplicationAdapters().find(
-  adapter => adapter.id === 'employmenthero'
-);
-if (!registeredEmploymentHeroAdapter || registeredEmploymentHeroAdapter.platform !== 'employmenthero') {
-  failures.push('registered adapters: expected Employment Hero adapter registration');
 }
 
 const greenhouseUrlAdapter = getApplicationAdapterForUrl('https://boards.greenhouse.io/acme/jobs/123');

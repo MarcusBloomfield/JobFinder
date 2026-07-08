@@ -35,7 +35,7 @@ export interface SeekLoginResult {
   url: string;
 }
 
-export type LoginPlatform = 'seek' | 'employmenthero';
+export type LoginPlatform = 'seek';
 
 export interface ApplicationProfileFillResult {
   profile: ApplicationProfile;

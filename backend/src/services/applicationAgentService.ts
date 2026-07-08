@@ -55,7 +55,7 @@ export type {
 };
 export { buildApplicationSnapshot, openSeekLoginBrowser };
 
-export type LoginPlatform = 'seek' | 'employmenthero';
+export type LoginPlatform = 'seek';
 
 interface LoginBrowserConfig {
   platform: LoginPlatform;
@@ -66,14 +66,7 @@ interface LoginBrowserConfig {
 
 const PLAYWRIGHT_DIR = path.resolve(__dirname, '../../.playwright');
 
-const loginBrowserConfigs: Record<Exclude<LoginPlatform, 'seek'>, LoginBrowserConfig> = {
-  employmenthero: {
-    platform: 'employmenthero',
-    displayName: 'Employment Hero',
-    loginUrl: 'https://employmenthero.com/jobs/',
-    profileDirName: 'employmenthero-profile'
-  }
-};
+const loginBrowserConfigs: Record<Exclude<LoginPlatform, 'seek'>, LoginBrowserConfig> = {};
 
 const loginSessions = new Map<LoginPlatform, { context: BrowserContext; page: Page }>();
 
@@ -466,10 +459,6 @@ export const applyToJob = async (
         ]
       );
     } else {
-      if (platform === 'employmenthero') {
-        await closeLoginSessionIfOpen(platform);
-      }
-
       result = await adapter.apply({
         job,
         resume,

@@ -12,7 +12,7 @@ WebJobFinder is a web application that helps job seekers find relevant job oppor
 
 - **Resume Upload**: Upload your resume in PDF or DOCX format
 - **AI Analysis**: Uses OpenAI to extract relevant search terms from your resume
-- **Job Scraping**: Scrapes job listings from popular job sites like Seek and Employment Hero
+- **Job Scraping**: Scrapes job listings from Seek
 - **Smart Matching**: Evaluates how well each job posting matches your resume
 - **Application Tracking**: Stores auto-apply runs in a local SQLite database for persistent progress tracking
 - **Favorites**: Save jobs you're interested in for later review
