@@ -1,6 +1,5 @@
 export type ApplicationPlatform =
   | 'seek'
-  | 'linkedin'
   | 'employmenthero'
   | 'greenhouse'
   | 'lever'
@@ -23,11 +22,6 @@ const PLATFORM_RULES: PlatformRule[] = [
   {
     platform: 'seek',
     hostPatterns: [/(^|\.)seek\./]
-  },
-  {
-    platform: 'linkedin',
-    hostPatterns: [/(^|\.)linkedin\.com$/],
-    pathPatterns: [/\/jobs(?:-guest)?\//i]
   },
   {
     platform: 'employmenthero',

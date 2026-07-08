@@ -2,7 +2,6 @@ export const JOB_APPLICATION_METHODS = [
   '',
   'seek',
   'company_website',
-  'linkedin',
   'employmenthero',
   'email',
   'recruiter',
@@ -15,7 +14,6 @@ export type JobApplicationMethod = typeof JOB_APPLICATION_METHODS[number];
 export const JOB_APPLICATION_METHOD_LABELS: Record<Exclude<JobApplicationMethod, ''>, string> = {
   seek: 'Seek',
   company_website: 'Company website',
-  linkedin: 'LinkedIn',
   employmenthero: 'Employment Hero',
   email: 'Email',
   recruiter: 'Recruiter',

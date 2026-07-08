@@ -13,7 +13,7 @@ interface ScrapeConfig {
     datePostedSelector?: string;
 }
 
-export type JobSearchSite = 'seek' | 'linkedin' | 'employmenthero';
+export type JobSearchSite = 'seek' | 'employmenthero';
 
 const siteConfigs: Record<string, ScrapeConfig> = {
     seek: {

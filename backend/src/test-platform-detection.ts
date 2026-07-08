@@ -2,9 +2,9 @@ import { ApplicationPlatform, detectPlatform } from './services/applicationPlatf
 
 const cases: Array<{ url: string; expected: ApplicationPlatform }> = [
   { url: 'https://www.seek.com.au/job/123', expected: 'seek' },
-  { url: 'https://www.linkedin.com/jobs/view/123', expected: 'linkedin' },
-  { url: 'https://au.linkedin.com/jobs/search/?keywords=developer', expected: 'linkedin' },
-  { url: 'https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/123', expected: 'linkedin' },
+  { url: 'https://www.linkedin.com/jobs/view/123', expected: 'generic' },
+  { url: 'https://au.linkedin.com/jobs/search/?keywords=developer', expected: 'generic' },
+  { url: 'https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/123', expected: 'generic' },
   { url: 'https://www.linkedin.com/feed/', expected: 'generic' },
   { url: 'https://jobs.swagapp.com/jobs/123', expected: 'employmenthero' },
   { url: 'https://employmenthero.com/jobs/123', expected: 'employmenthero' },

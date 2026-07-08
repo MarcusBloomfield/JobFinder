@@ -198,15 +198,11 @@ const inferApplicationMethodFromUrl = (value?: string | null): JobApplicationMet
       return 'seek';
     }
 
-      if (hostname.includes('linkedin.')) {
-        return 'linkedin';
-      }
+    if (hostname.includes('employmenthero.') || hostname.includes('swagapp.')) {
+      return 'employmenthero';
+    }
 
-      if (hostname.includes('employmenthero.') || hostname.includes('swagapp.')) {
-        return 'employmenthero';
-      }
-
-      return 'company_website';
+    return 'company_website';
   } catch {
     return 'other';
   }

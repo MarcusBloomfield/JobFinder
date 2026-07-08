@@ -18,7 +18,6 @@ type AppPage = 'search' | 'profile' | 'progress' | 'settings';
 
 const jobSiteLoginButtons: Array<{ platform: LoginPlatform; label: string }> = [
     { platform: 'seek', label: 'Seek' },
-    { platform: 'linkedin', label: 'LinkedIn' },
     { platform: 'employmenthero', label: 'Employment Hero' }
 ];
 

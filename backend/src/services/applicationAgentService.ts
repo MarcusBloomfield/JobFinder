@@ -55,7 +55,7 @@ export type {
 };
 export { buildApplicationSnapshot, openSeekLoginBrowser };
 
-export type LoginPlatform = 'seek' | 'linkedin' | 'employmenthero';
+export type LoginPlatform = 'seek' | 'employmenthero';
 
 interface LoginBrowserConfig {
   platform: LoginPlatform;
@@ -67,12 +67,6 @@ interface LoginBrowserConfig {
 const PLAYWRIGHT_DIR = path.resolve(__dirname, '../../.playwright');
 
 const loginBrowserConfigs: Record<Exclude<LoginPlatform, 'seek'>, LoginBrowserConfig> = {
-  linkedin: {
-    platform: 'linkedin',
-    displayName: 'LinkedIn',
-    loginUrl: 'https://www.linkedin.com/login',
-    profileDirName: 'linkedin-profile'
-  },
   employmenthero: {
     platform: 'employmenthero',
     displayName: 'Employment Hero',
@@ -472,7 +466,7 @@ export const applyToJob = async (
         ]
       );
     } else {
-      if (platform === 'linkedin' || platform === 'employmenthero') {
+      if (platform === 'employmenthero') {
         await closeLoginSessionIfOpen(platform);
       }
 

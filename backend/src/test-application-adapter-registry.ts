@@ -23,24 +23,8 @@ if (seekUrlAdapter.id !== 'seek') {
 }
 
 const linkedInUrlAdapter = getApplicationAdapterForUrl('https://www.linkedin.com/jobs/view/123');
-if (linkedInUrlAdapter.id !== 'linkedin') {
-  failures.push(`LinkedIn URL: expected linkedin, got ${linkedInUrlAdapter.id}`);
-}
-const linkedInGuestUrlAdapter = getApplicationAdapterForUrl(
-  'https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/123'
-);
-if (linkedInGuestUrlAdapter.id !== 'linkedin') {
-  failures.push(`LinkedIn guest URL: expected linkedin, got ${linkedInGuestUrlAdapter.id}`);
-}
-if (linkedInUrlAdapter.canAutoSubmit) {
-  failures.push('linkedin adapter: expected canAutoSubmit=false for final-review handoff');
-}
-
-const registeredLinkedInAdapter = getRegisteredApplicationAdapters().find(
-  adapter => adapter.id === 'linkedin'
-);
-if (!registeredLinkedInAdapter || registeredLinkedInAdapter.platform !== 'linkedin') {
-  failures.push('registered adapters: expected LinkedIn adapter registration');
+if (linkedInUrlAdapter.id !== 'generic') {
+  failures.push(`LinkedIn URL: expected generic, got ${linkedInUrlAdapter.id}`);
 }
 
 const employmentHeroUrlAdapter = getApplicationAdapterForUrl('https://jobs.swagapp.com/jobs/123');

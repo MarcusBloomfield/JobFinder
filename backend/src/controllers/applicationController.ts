@@ -193,10 +193,10 @@ export const openJobSiteLoginBrowser = async (req: Request, res: Response) => {
   try {
     const platform = req.params.platform;
 
-    if (platform !== 'seek' && platform !== 'linkedin' && platform !== 'employmenthero') {
+    if (platform !== 'seek' && platform !== 'employmenthero') {
       return res.status(400).json({
         error: true,
-        message: 'Invalid login platform. Expected seek, linkedin, or employmenthero.'
+        message: 'Invalid login platform. Expected seek or employmenthero.'
       });
     }
 

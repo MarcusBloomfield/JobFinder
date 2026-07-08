@@ -5,7 +5,7 @@ import path from 'path';
 import { Job } from '../models/Job';
 import { v4 as uuidv4 } from 'uuid';
 
-export const SUPPORTED_JOB_SEARCH_SITES = ['seek', 'linkedin', 'employmenthero'] as const;
+export const SUPPORTED_JOB_SEARCH_SITES = ['seek', 'employmenthero'] as const;
 export type JobSearchSite = typeof SUPPORTED_JOB_SEARCH_SITES[number];
 
 const PLAYWRIGHT_DIR = path.resolve(__dirname, '../../.playwright');
@@ -13,7 +13,6 @@ const JOB_SEARCH_HTML_DIR = path.join(PLAYWRIGHT_DIR, 'job-search-html');
 const DEFAULT_JOB_SEARCH_PROFILE_DIR = 'job-search-profile';
 const SITE_PROFILE_DIRS: Record<JobSearchSite, string> = {
   seek: 'seek-profile',
-  linkedin: 'linkedin-profile',
   employmenthero: 'employmenthero-profile'
 };
 
@@ -91,10 +90,6 @@ const inferJobSearchSiteFromUrl = (jobUrl: string): JobSearchSite | undefined =>
 
     if (hostname.endsWith('seek.com.au')) {
       return 'seek';
-    }
-
-    if (hostname.endsWith('linkedin.com')) {
-      return 'linkedin';
     }
 
     if (hostname.endsWith('employmenthero.com') || hostname.endsWith('swagapp.com')) {
@@ -486,18 +481,6 @@ const siteConfigs: Record<JobSearchSite, ScrapeConfig> = {
     datePostedSelector: '[data-automation="jobListingDate"]',
     locationParam: '&where=',
     baseUrl: 'https://www.seek.com.au'
-  },
-  linkedin: {
-    searchUrl: 'https://www.linkedin.com/jobs/search/?keywords=',
-    titleSelector: '.base-search-card__title, .job-card-list__title, a.job-card-list__title',
-    companySelector: '.base-search-card__subtitle, .job-card-container__primary-description',
-    descriptionSelector: '.base-search-card__metadata, .job-search-card__snippet',
-    linkSelector: 'a.base-card__full-link, a.job-card-list__title, a[href*="/jobs/view/"]',
-    locationSelector: '.job-search-card__location, .job-card-container__metadata-item',
-    salarySelector: '.job-search-card__salary-info',
-    datePostedSelector: 'time, .job-search-card__listdate',
-    locationParam: '&location=',
-    baseUrl: 'https://www.linkedin.com'
   },
   employmenthero: {
     searchUrl: 'https://employmenthero.com/jobs/',
@@ -1219,12 +1202,6 @@ const clickNextPage = async (page: Page, site: string): Promise<void> => {
 
 const getNextPageSelector = (site: string): string => {
   switch (site) {
-    case 'linkedin':
-      return [
-        'button[aria-label="View next page"]',
-        'button[aria-label="Next"]',
-        'a[aria-label="Next"]'
-      ].join(', ');
     case 'employmenthero':
       return [
         'button[aria-label="Next page"]',
